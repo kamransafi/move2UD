@@ -128,7 +128,13 @@ mt_dbbmm_ud.mt_dbbmm_variance <- function(object,
     time_step, 4, object$interest
   )
 
-  ans <- ans / sum(ans)
+  total <- sum(ans)
+  if (total == 0 || !is.finite(total)) {
+    stop("UD computation produced zero or non-finite values. ",
+         "The raster extent may not overlap the track, or ext may be too large.",
+         call. = FALSE)
+  }
+  ans <- ans / total
   terra::values(raster) <- ans
 
   raster

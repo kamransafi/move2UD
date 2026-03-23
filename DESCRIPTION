@@ -1,12 +1,11 @@
 Package: move2UD
 Title: Dynamic Brownian Bridge Movement Models for move2 Objects
-Version: 0.1.0
+Version: 0.1.1
 Authors@R: c(
     person("Bart", "Kranstauber", role = c("aut", "cre"), email = "b.kranstauber@uva.nl"),
     person("Kamran", "Safi", role = "aut"),
     person("Anne K.", "Scharf", role = "aut"),
-    person("Marco", "Smolla", role = "ctb"),
-    person("Claude", "AI", role = "ctb", comment = "Migration from move to move2/sf/terra"))
+    person("Marco", "Smolla", role = "ctb"))
 Description: Dynamic Brownian Bridge Movement Models (dBBMM) and dynamic
     Bivariate Gaussian Bridge (dBGB) models for estimating utilisation
     distributions and movement variance from animal tracking data. This
@@ -25,11 +24,8 @@ Imports:
     move2,
     sf,
     terra,
-    units,
-    methods
+    units
 Suggests:
-    dplyr,
-    ggplot2,
-    lubridate,
+    parallel,
     testthat (>= 3.0.0)
 Config/testthat/edition: 3

@@ -62,10 +62,16 @@ mt_dbgb_variance <- function(object, location_error, margin, window_size,
   }
 
   # Process all windows — parallel or sequential
-  if (parallel && .Platform$OS.type != "windows") {
-    if (is.null(cores)) cores <- max(1, parallel::detectCores() - 1)
-    all_results <- parallel::mclapply(seq_len(n_windows), process_window,
-                                       mc.cores = cores)
+  if (parallel) {
+    if (.Platform$OS.type == "windows") {
+      message("Note: parallel processing uses mclapply which is not available on Windows. ",
+              "Falling back to sequential processing.")
+      all_results <- lapply(seq_len(n_windows), process_window)
+    } else {
+      if (is.null(cores)) cores <- max(1, parallel::detectCores() - 1)
+      all_results <- parallel::mclapply(seq_len(n_windows), process_window,
+                                         mc.cores = cores)
+    }
   } else {
     all_results <- lapply(seq_len(n_windows), process_window)
   }

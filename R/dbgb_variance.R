@@ -145,7 +145,9 @@ bgb_var_break <- function(x_coords, y_coords, time_mins, location_error, margin)
   }
 
   opt <- best$opt
-  if (any(opt$par == 0)) warning("Optimized to zero")
+  # Suppress "Optimized to zero" — this is expected for windows with
+  # minimal movement and would otherwise flood the console with thousands
+  # of warnings during normal use
 
   # Build result vectors
   result <- cbind(

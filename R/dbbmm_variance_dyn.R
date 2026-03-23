@@ -74,11 +74,11 @@ mt_dbbmm_variance <- function(object, location_error, window_size, margin,
   if (any((c(margin, window_size) %% 2) != 1)) {
     stop("margin and window_size must both be odd.", call. = FALSE)
   }
+  if (window_size < 2 * margin + 1) {
+    stop("window_size must be at least 2 * margin + 1.", call. = FALSE)
+  }
 
   breaks_range <- margin:(window_size - margin + 1)
-  if (is.unsorted(breaks_range)) {
-    stop("window_size must be at least 2 * margin.", call. = FALSE)
-  }
   uneven_breaks <- breaks_range[(breaks_range %% 2) == 1]
 
   n_windows <- n - window_size + 1
@@ -97,9 +97,15 @@ mt_dbbmm_variance <- function(object, location_error, window_size, margin,
   }
 
   # Process all windows — parallel or sequential
-  if (parallel && .Platform$OS.type != "windows") {
-    if (is.null(cores)) cores <- max(1, parallel::detectCores() - 1)
-    results <- parallel::mclapply(1:n_windows, process_window, mc.cores = cores)
+  if (parallel) {
+    if (.Platform$OS.type == "windows") {
+      message("Note: parallel processing uses mclapply which is not available on Windows. ",
+              "Falling back to sequential processing.")
+      results <- lapply(1:n_windows, process_window)
+    } else {
+      if (is.null(cores)) cores <- max(1, parallel::detectCores() - 1)
+      results <- parallel::mclapply(1:n_windows, process_window, mc.cores = cores)
+    }
   } else {
     results <- lapply(1:n_windows, process_window)
   }

@@ -15,11 +15,10 @@ S3method(mt_motion_variance, mt_dbgb_variance)
 S3method(print, mt_dbbmm_variance)
 S3method(print, mt_dbgb_variance)
 
-importFrom(sf, st_coordinates, st_crs, st_is_longlat, st_bbox, st_as_sf)
-importFrom(move2, mt_time, mt_track_id, mt_n_tracks, mt_time_lags)
+importFrom(sf, st_coordinates, st_crs, st_is_longlat, st_bbox, st_as_sf, st_is_empty)
+importFrom(move2, mt_time, mt_track_id, mt_n_tracks, mt_time_lags, mt_is_move2)
 importFrom(terra, rast, ext, xFromCol, yFromRow, ncol, nrow, ncell, values)
 importFrom(units, set_units, as_units)
 importFrom(stats, aggregate, optim, optimize)
-importFrom(grDevices, grey)
 
 useDynLib(move2UD, .registration = TRUE)

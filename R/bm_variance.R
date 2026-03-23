@@ -65,8 +65,8 @@ bm_variance <- function(time_lag, location_error, x, y) {
     stop("Optimization failed! Consider changing map units.")
   }
 
-  if ((length(x) %% 2) != 1) {
-    warning("Not an even number of locations in variance function")
+  if ((length(x) %% 2) == 0) {
+    warning("Even number of locations in variance function; last location unused.")
   }
 
   list(BMvar = BMvar$minimum, cll = -BMvar$objective)

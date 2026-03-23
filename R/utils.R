@@ -1,27 +1,69 @@
-#' @importFrom sf st_coordinates st_crs st_is_longlat st_bbox
-#' @importFrom move2 mt_time mt_track_id mt_n_tracks mt_time_lags
+#' @importFrom sf st_coordinates st_crs st_is_longlat st_bbox st_as_sf st_is_empty
+#' @importFrom move2 mt_time mt_track_id mt_n_tracks mt_time_lags mt_is_move2
 #' @importFrom terra rast ext xFromCol yFromRow ncol nrow ncell values
 #' @importFrom units set_units as_units
-#' @importFrom methods new
+#' @importFrom stats aggregate optim optimize
 NULL
 
 #' Extract coordinates, timestamps, and time lags from a move2 object
 #'
 #' Internal helper that validates and extracts the numeric vectors
-#' needed by the dBBMM/dBGB algorithms.
+#' needed by the dBBMM/dBGB algorithms. Performs all input validation.
 #'
 #' @param x A `move2` object (single track).
 #' @return A list with components `x`, `y`, `time_mins`, `n_locs`.
 #' @keywords internal
 .extract_track_data <- function(x) {
+  # Validate move2 object
+  if (!mt_is_move2(x)) {
+    stop("Input must be a move2 object.", call. = FALSE)
+  }
+
+  # Must be a single track
+  if (mt_n_tracks(x) > 1) {
+    stop("Input must contain a single track. Use dplyr::filter() to select ",
+         "one individual, or process tracks in a loop.", call. = FALSE)
+  }
+
+  # Must be projected
   if (st_is_longlat(x)) {
     stop("Cannot use longitude/latitude coordinates. ",
-         "Transform to a projected CRS first using sf::st_transform().",
+         "Transform to a projected CRS first, e.g.: ",
+         "sf::st_transform(x, move2::mt_aeqd_crs(x))",
          call. = FALSE)
   }
+
+  # Check for empty geometries
+  empties <- st_is_empty(x)
+  if (any(empties)) {
+    stop("Input contains ", sum(empties), " empty geometries (failed GPS fixes). ",
+         "Remove them first: x <- x[!sf::st_is_empty(x), ]",
+         call. = FALSE)
+  }
+
   coords <- st_coordinates(x)
-  timestamps <- as.numeric(mt_time(x))  # seconds since epoch
-  time_mins <- timestamps / 60          # minutes (matching move convention)
+
+  # Check for NaN/NA coordinates
+  if (any(!is.finite(coords))) {
+    stop("Input contains non-finite coordinates (NA, NaN, or Inf).", call. = FALSE)
+  }
+
+  timestamps <- mt_time(x)
+
+  # Check timestamps are ordered
+  ts_numeric <- as.numeric(timestamps)
+  if (is.unsorted(ts_numeric, strictly = FALSE)) {
+    stop("Timestamps are not in chronological order. Sort the data first.",
+         call. = FALSE)
+  }
+
+  # Check for duplicate timestamps
+  if (any(diff(ts_numeric) == 0)) {
+    stop("Input contains duplicate timestamps. Remove duplicates first, e.g.: ",
+         "move2::mt_filter_unique(x)", call. = FALSE)
+  }
+
+  time_mins <- ts_numeric / 60  # minutes (matching move convention)
 
   list(
     x = coords[, 1],
@@ -81,7 +123,6 @@ NULL
     cell_size <- max(x_range, y_range) / dim_size
   }
 
-  # Adjust ranges to fit exact cell sizes
   ymin <- range["ymin"] - (ceiling(y_range / cell_size) * cell_size - y_range) / 2
   ymax <- range["ymax"] + (ceiling(y_range / cell_size) * cell_size - y_range) / 2
   xmin <- range["xmin"] - (ceiling(x_range / cell_size) * cell_size - x_range) / 2

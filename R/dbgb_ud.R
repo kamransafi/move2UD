@@ -61,7 +61,10 @@ mt_dbgb_ud.mt_dbgb_variance <- function(object,
   n <- td$n_locs
   location_error <- .expand_loc_error(location_error, n)
 
-  points_interest <- object$seg_interest | rev(object$seg_interest)
+  # Include both endpoints of interested segments:
+  # a segment between positions i and i+1 needs both positions present
+  si <- object$seg_interest
+  points_interest <- si | c(FALSE, si[-length(si)])
 
   if (is.null(raster)) {
     pts <- sf::st_as_sf(
@@ -99,7 +102,13 @@ mt_dbgb_ud.mt_dbgb_variance <- function(object,
     x_grid, y_grid, time_step, 5
   )
 
-  ans <- ans / sum(ans)
+  total <- sum(ans)
+  if (total == 0 || !is.finite(total)) {
+    stop("UD computation produced zero or non-finite values. ",
+         "The raster extent may not overlap the track, or ext may be too large.",
+         call. = FALSE)
+  }
+  ans <- ans / total
   terra::values(raster) <- ans
 
   raster

@@ -31,12 +31,10 @@ library(sf)
 
 # Load example data (fishers from LaPoint et al.)
 fishers <- mt_read(mt_example())
+
+# Prepare: remove empty geometries, select one individual, project
 fishers <- fishers[!st_is_empty(fishers), ]
-
-# Select one individual
 f1 <- fishers[mt_track_id(fishers) == "F1", ]
-
-# Project to an equidistant CRS (required — cannot use lon/lat)
 f1_proj <- st_transform(f1, mt_aeqd_crs(f1))
 
 # Compute dBBMM utilisation distribution
@@ -136,15 +134,19 @@ terra::plot(ud_bgb)
 | `ext` | Extension factor for auto-generated raster extent | Increase if you get "grid not large enough" errors |
 | `dim_size` | Number of cells along the longest axis of the raster | Higher = finer resolution, slower computation |
 
-### Projection requirement
+### Input requirements
 
-All functions require the input to be in a **projected coordinate system** (not longitude/latitude). The recommended approach uses `move2::mt_aeqd_crs()`, which creates an azimuthal equidistant projection centred on the data:
+All functions validate their input and produce informative error messages. The requirements are:
 
-```r
-data_proj <- st_transform(data, mt_aeqd_crs(data))
-```
-
-This ensures distances are measured in metres and are consistent across the study area.
+- **Single track**: The `move2` object must contain exactly one individual. Filter first with `dplyr::filter()` or process tracks in a loop.
+- **Projected CRS**: Must not be longitude/latitude. Use `move2::mt_aeqd_crs()` for an azimuthal equidistant projection centred on the data:
+  ```r
+  data_proj <- st_transform(data, mt_aeqd_crs(data))
+  ```
+- **No empty geometries**: Remove failed GPS fixes first: `data <- data[!sf::st_is_empty(data), ]`
+- **Ordered, unique timestamps**: Data must be sorted by time with no duplicate timestamps. Use `move2::mt_filter_unique()` if needed.
+- **Positive location error**: `location_error` must be > 0 (not zero).
+- **Window/margin constraints**: `window_size` and `margin` must be odd, and `window_size >= 2 * margin + 1`.
 
 ## Output
 
