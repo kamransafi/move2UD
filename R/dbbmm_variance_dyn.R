@@ -4,7 +4,8 @@
 #' approach with BIC-based breakpoint detection.
 #'
 #' @param object A `move2` object containing a single track. Must be in a
-#'   projected coordinate system (not longitude/latitude).
+#'   projected coordinate system (not longitude/latitude). Use
+#'   [move2::mt_aeqd_crs()] to create a suitable projection.
 #' @param location_error Numeric scalar or vector of location errors (in map
 #'   units) for each position.
 #' @param window_size Integer (must be odd). The number of locations in each
@@ -12,20 +13,17 @@
 #' @param margin Integer (must be odd). The minimum number of locations on
 #'   each side of a potential breakpoint within a window.
 #'
-#' @return A `dbbmm_var` object (S3 list) containing:
+#' @return An `mt_dbbmm_variance` object (S3 list) containing:
 #'   \describe{
 #'     \item{variance}{Numeric vector of estimated BM variances per segment
 #'       (NA for positions outside the estimable range).}
 #'     \item{in_windows}{Number of windows each segment was estimated in.}
 #'     \item{interest}{Logical vector indicating segments fully covered by
-#'       the sliding window (i.e., where the variance estimate is based on
-#'       the maximum number of windows).}
-#'     \item{break_list}{Integer vector of positions where breakpoints were
-#'       detected.}
+#'       the sliding window.}
+#'     \item{break_list}{Integer vector of detected breakpoint positions.}
 #'     \item{window_size}{The window size used.}
 #'     \item{margin}{The margin used.}
-#'     \item{track_data}{The coordinates, timestamps, and CRS from the
-#'       input move2 object.}
+#'     \item{track_data}{Coordinates, timestamps, and CRS from the input.}
 #'   }
 #'
 #' @details
@@ -42,16 +40,24 @@
 #' distributions for heterogeneous animal movement. *Journal of Animal
 #' Ecology*, 81(4), 738-746.
 #'
+#' @examples
+#' \dontrun{
+#' library(move2)
+#' library(sf)
+#' fishers <- mt_read(mt_example())
+#' fishers <- fishers[!st_is_empty(fishers), ]
+#' f1 <- fishers[mt_track_id(fishers) == "F1", ]
+#' f1_proj <- st_transform(f1, mt_aeqd_crs(f1))
+#' var_obj <- mt_dbbmm_variance(f1_proj, location_error = 25,
+#'                               window_size = 31, margin = 11)
+#' }
+#'
 #' @export
-dbbmm_variance_dyn <- function(object, location_error, window_size, margin) {
-  # Extract track data
+mt_dbbmm_variance <- function(object, location_error, window_size, margin) {
   td <- .extract_track_data(object)
   n <- td$n_locs
 
-  # Compute time lags in minutes
   time_lag <- c(diff(td$time_mins), 0)
-
-  # Validate inputs
   location_error <- .expand_loc_error(location_error, n)
 
   if (n < window_size) {
@@ -69,7 +75,6 @@ dbbmm_variance_dyn <- function(object, location_error, window_size, margin) {
   breaks_found <- c()
   bm_vars <- data.frame(BMvar = numeric(0), loc = numeric(0))
 
-  # Slide window across trajectory
   for (w in 1:(n - window_size + 1)) {
     idx <- w:(w - 1 + window_size)
     x_sub <- td$x[idx]
@@ -77,12 +82,10 @@ dbbmm_variance_dyn <- function(object, location_error, window_size, margin) {
     tl_sub <- time_lag[idx]
     le_sub <- location_error[idx]
 
-    # Variance for whole window
     whole <- bm_variance(time_lag = tl_sub, location_error = le_sub,
                          x = x_sub, y = y_sub)
     whole$BIC <- -2 * whole$cll + log(window_size)
 
-    # Try all possible breakpoints
     break_best <- list(BIC = Inf)
     for (b in uneven_breaks) {
       before <- bm_variance(
@@ -103,7 +106,6 @@ dbbmm_variance_dyn <- function(object, location_error, window_size, margin) {
       }
     }
 
-    # Decide: one variance or two?
     if (break_best$BIC < whole$BIC) {
       window_vars <- c(
         rep(break_best$var_before, sum(breaks_range < break_best$b)),
@@ -120,15 +122,12 @@ dbbmm_variance_dyn <- function(object, location_error, window_size, margin) {
     ))
   }
 
-  # Aggregate across overlapping windows
   agg <- aggregate(BMvar ~ loc, data = bm_vars,
                    FUN = function(x) c(mean = mean(x), length = length(x)))
   means_mat <- agg$BMvar
 
-  # Build output vectors (NA-padded)
   variance <- rep(NA_real_, n)
   in_windows <- rep(NA_real_, n)
-
   variance[agg$loc] <- means_mat[, "mean"]
   in_windows[agg$loc] <- means_mat[, "length"]
 
@@ -153,33 +152,33 @@ dbbmm_variance_dyn <- function(object, location_error, window_size, margin) {
         timestamps = mt_time(object)
       )
     ),
-    class = "dbbmm_var"
+    class = "mt_dbbmm_variance"
   )
 }
 
 #' @export
-print.dbbmm_var <- function(x, ...) {
-  cat("Dynamic Brownian Bridge Movement Model — variance estimate\n")
+print.mt_dbbmm_variance <- function(x, ...) {
+  cat("Dynamic Brownian Bridge Movement Model \u2014 variance estimate\n")
   cat(sprintf("  Locations: %d\n", x$track_data$n_locs))
   cat(sprintf("  Window size: %d, Margin: %d\n", x$window_size, x$margin))
   cat(sprintf("  Breakpoints found: %d\n", length(x$break_list)))
-  cat(sprintf("  Variance range: %.2f – %.2f\n",
+  cat(sprintf("  Variance range: %.2f \u2013 %.2f\n",
               min(x$variance, na.rm = TRUE), max(x$variance, na.rm = TRUE)))
   invisible(x)
 }
 
-#' Extract motion variance from a dbbmm_var object
+#' Extract motion variance
 #'
-#' @param x A `dbbmm_var` or `dbgb_var` object.
+#' @param x An `mt_dbbmm_variance` or `mt_dbgb_variance` object.
 #' @param ... Ignored.
-#' @return For `dbbmm_var`: a numeric vector of variances.
-#'   For `dbgb_var`: a data.frame with columns `para` and `orth`.
+#' @return For `mt_dbbmm_variance`: a numeric vector of variances.
+#'   For `mt_dbgb_variance`: a data.frame with columns `para` and `orth`.
 #' @export
-get_motion_variance <- function(x, ...) {
-  UseMethod("get_motion_variance")
+mt_motion_variance <- function(x, ...) {
+  UseMethod("mt_motion_variance")
 }
 
 #' @export
-get_motion_variance.dbbmm_var <- function(x, ...) {
+mt_motion_variance.mt_dbbmm_variance <- function(x, ...) {
   x$variance
 }

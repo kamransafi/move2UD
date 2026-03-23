@@ -3,8 +3,8 @@
 #' Compute a utilisation distribution (UD) from a movement track using
 #' the dynamic Brownian bridge movement model.
 #'
-#' @param object A `move2` object (single track, projected CRS) or a
-#'   `dbbmm_var` object from [dbbmm_variance_dyn()].
+#' @param object A `move2` object (single track, projected CRS) or an
+#'   `mt_dbbmm_variance` object from [mt_dbbmm_variance()].
 #' @param raster A `terra::SpatRaster` defining the output grid, or a
 #'   numeric scalar giving the cell size in map units, or `NULL` to
 #'   auto-compute from `dim_size`.
@@ -24,8 +24,8 @@
 #'
 #' @details
 #' If `object` is a `move2` object, the variance is estimated first
-#' using [dbbmm_variance_dyn()], then the UD is computed. If `object`
-#' is already a `dbbmm_var` object, the UD is computed directly.
+#' using [mt_dbbmm_variance()], then the UD is computed. If `object`
+#' is already an `mt_dbbmm_variance` object, the UD is computed directly.
 #'
 #' @references
 #' Kranstauber, B., Kays, R., LaPoint, S. D., Wikelski, M., & Safi, K.
@@ -33,52 +33,63 @@
 #' distributions for heterogeneous animal movement. *Journal of Animal
 #' Ecology*, 81(4), 738-746.
 #'
+#' @examples
+#' \dontrun{
+#' library(move2)
+#' library(sf)
+#' fishers <- mt_read(mt_example())
+#' fishers <- fishers[!st_is_empty(fishers), ]
+#' f1 <- fishers[mt_track_id(fishers) == "F1", ]
+#' f1_proj <- st_transform(f1, mt_aeqd_crs(f1))
+#' ud <- mt_dbbmm_ud(f1_proj, location_error = 25,
+#'                    window_size = 31, margin = 11)
+#' terra::plot(ud)
+#' }
+#'
 #' @export
-dbbmm_ud <- function(object,
-                     raster = NULL,
-                     location_error,
-                     margin = 11,
-                     window_size = 31,
-                     ext = 0.5,
-                     dim_size = 100,
-                     time_step = NULL,
-                     verbose = TRUE) {
-  UseMethod("dbbmm_ud")
+mt_dbbmm_ud <- function(object,
+                         raster = NULL,
+                         location_error,
+                         margin = 11,
+                         window_size = 31,
+                         ext = 0.5,
+                         dim_size = 100,
+                         time_step = NULL,
+                         verbose = TRUE) {
+  UseMethod("mt_dbbmm_ud")
 }
 
 #' @export
-dbbmm_ud.move2 <- function(object,
-                            raster = NULL,
-                            location_error,
-                            margin = 11,
-                            window_size = 31,
-                            ext = 0.5,
-                            dim_size = 100,
-                            time_step = NULL,
-                            verbose = TRUE) {
-  var_obj <- dbbmm_variance_dyn(object, location_error = location_error,
-                                 window_size = window_size, margin = margin)
-  dbbmm_ud(var_obj, raster = raster, location_error = location_error,
-           ext = ext, dim_size = dim_size, time_step = time_step,
-           verbose = verbose)
-}
-
-#' @export
-dbbmm_ud.dbbmm_var <- function(object,
+mt_dbbmm_ud.move2 <- function(object,
                                 raster = NULL,
                                 location_error,
+                                margin = 11,
+                                window_size = 31,
                                 ext = 0.5,
                                 dim_size = 100,
                                 time_step = NULL,
-                                verbose = TRUE,
-                                ...) {
+                                verbose = TRUE) {
+  var_obj <- mt_dbbmm_variance(object, location_error = location_error,
+                                window_size = window_size, margin = margin)
+  mt_dbbmm_ud(var_obj, raster = raster, location_error = location_error,
+               ext = ext, dim_size = dim_size, time_step = time_step,
+               verbose = verbose)
+}
+
+#' @export
+mt_dbbmm_ud.mt_dbbmm_variance <- function(object,
+                                            raster = NULL,
+                                            location_error,
+                                            ext = 0.5,
+                                            dim_size = 100,
+                                            time_step = NULL,
+                                            verbose = TRUE,
+                                            ...) {
   td <- object$track_data
   n <- td$n_locs
   location_error <- .expand_loc_error(location_error, n)
 
-  # Create raster if not provided
   if (is.null(raster)) {
-    # Create a temporary sf object for extent computation
     pts <- sf::st_as_sf(
       data.frame(x = td$x, y = td$y),
       coords = c("x", "y"), crs = td$crs
@@ -92,7 +103,6 @@ dbbmm_ud.dbbmm_var <- function(object,
     raster <- .make_raster(pts, cell_size = raster, ext = ext)
   }
 
-  # Compute time lags
   time_lag <- c(diff(td$time_mins), 0)
 
   if (is.null(time_step)) {
@@ -104,29 +114,20 @@ dbbmm_ud.dbbmm_var <- function(object,
     message(sprintf("Computational size: %.1e", comp_size))
   }
 
-  # Call the C kernel
   x_grid <- terra::xFromCol(raster, 1:terra::ncol(raster))
   y_grid <- terra::yFromRow(raster, terra::nrow(raster):1)
 
-  # Variance vector: pad with 0 at end
   sigma <- c(object$variance, 0)
   sigma[is.na(sigma)] <- 0
 
   ans <- .Call(
     "dbbmm2",
-    td$x,
-    td$y,
-    sigma,
+    td$x, td$y, sigma,
     (td$time_mins - min(td$time_mins)),
-    location_error,
-    x_grid,
-    y_grid,
-    time_step,
-    4,  # number of SDs for extent
-    object$interest
+    location_error, x_grid, y_grid,
+    time_step, 4, object$interest
   )
 
-  # Normalise and set values
   ans <- ans / sum(ans)
   terra::values(raster) <- ans
 

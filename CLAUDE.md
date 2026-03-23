@@ -32,20 +32,40 @@ These C functions take raw numeric vectors (coordinates, variances, times, grid 
 | File | Exports | Purpose |
 |------|---------|---------|
 | `R/bm_variance.R` | `bm_variance()` (internal) | Core leave-one-out likelihood BM variance estimation |
-| `R/dbbmm_variance_dyn.R` | `dbbmm_variance_dyn()`, `get_motion_variance()` | Dynamic sliding-window variance with BIC breakpoint detection |
-| `R/dbbmm_ud.R` | `dbbmm_ud()` | dBBMM utilisation distribution computation |
+| `R/dbbmm_variance_dyn.R` | `mt_dbbmm_variance()`, `mt_motion_variance()` | Dynamic sliding-window variance with BIC breakpoint detection |
+| `R/dbbmm_ud.R` | `mt_dbbmm_ud()` | dBBMM utilisation distribution computation |
 | `R/dbgb_variance.R` | `delta_para_orth()`, `bgb_var_single()`, `bgb_var_break()` (internal) | BGB parallel/orthogonal decomposition and breakpoint detection |
-| `R/dbgb_variance_dyn.R` | `dbgb_variance_dyn()` | Dynamic BGB variance estimation |
-| `R/dbgb_ud.R` | `dbgb_ud()` | dBGB utilisation distribution computation |
+| `R/dbgb_variance_dyn.R` | `mt_dbgb_variance()` | Dynamic BGB variance estimation |
+| `R/dbgb_ud.R` | `mt_dbgb_ud()` | dBGB utilisation distribution computation |
 | `R/utils.R` | internal helpers | `.extract_track_data()`, `.expand_loc_error()`, `.extcalc()`, `.make_raster()` |
+
+### Naming conventions
+
+All exported functions follow the `move2` naming pattern:
+
+- **`mt_` prefix** for all functions (matches `move2` convention: `mt_speed()`, `mt_distance()`, etc.)
+- **Method abbreviation**: `dbbmm` / `dbgb` (well-known in movement ecology)
+- **`_variance` / `_ud`**: the computation type
+- **`mt_motion_variance()`**: accessor following the `mt_` + noun pattern (like `mt_time()`, `mt_track_data()`)
+- **`location_error`**: consistent parameter name across all functions (not `loc_err`)
 
 ### Object model
 
 The old `move` package used a deep S4 class hierarchy (`dBMvariance` → `.MoveTrackSingle` → `SpatialPointsDataFrame`, `DBBMM` → `.UD` → `RasterLayer`). This package uses simple S3 lists:
 
-- **`dbbmm_var`**: list with `variance`, `in_windows`, `interest`, `break_list`, `window_size`, `margin`, `track_data`
-- **`dbgb_var`**: list with `para_sd`, `orth_sd`, `n_estim`, `seg_interest`, `margin`, `window_size`, `track_data`
+- **`mt_dbbmm_variance`**: list with `variance`, `in_windows`, `interest`, `break_list`, `window_size`, `margin`, `track_data`
+- **`mt_dbgb_variance`**: list with `para_sd`, `orth_sd`, `n_estim`, `seg_interest`, `margin`, `window_size`, `track_data`
 - **UD output**: plain `terra::SpatRaster` (no custom class — use `terra` functions directly)
+
+### CRS handling
+
+Users should project their data before calling any `move2UD` function. The recommended approach uses `move2::mt_aeqd_crs()`:
+
+```r
+data_proj <- sf::st_transform(data, move2::mt_aeqd_crs(data))
+```
+
+This creates an azimuthal equidistant projection centred on the data, matching what the old `move::spTransform(x, center=TRUE)` did.
 
 ## Build and check
 

@@ -4,12 +4,13 @@
 #' sliding window approach with BIC-based breakpoint detection.
 #'
 #' @param object A `move2` object containing a single track. Must be in a
-#'   projected coordinate system.
-#' @param loc_err Numeric scalar or vector of location errors.
+#'   projected coordinate system. Use [move2::mt_aeqd_crs()] to create
+#'   a suitable projection.
+#' @param location_error Numeric scalar or vector of location errors.
 #' @param margin Integer (odd). Margin for breakpoint detection.
 #' @param window_size Integer (odd). Sliding window size.
 #'
-#' @return A `dbgb_var` object (S3 list) containing:
+#' @return An `mt_dbgb_variance` object (S3 list) containing:
 #'   \describe{
 #'     \item{para_sd}{Numeric vector of parallel SD per position.}
 #'     \item{orth_sd}{Numeric vector of orthogonal SD per position.}
@@ -26,11 +27,11 @@
 #' models. *Movement Ecology*, 2(1), 5.
 #'
 #' @export
-dbgb_variance_dyn <- function(object, loc_err, margin, window_size) {
+mt_dbgb_variance <- function(object, location_error, margin, window_size) {
   td <- .extract_track_data(object)
   n <- td$n_locs
 
-  loc_err <- .expand_loc_error(loc_err, n)
+  location_error <- .expand_loc_error(location_error, n)
 
   if (n < window_size) {
     stop("window_size cannot be larger than the number of locations.", call. = FALSE)
@@ -39,7 +40,6 @@ dbgb_variance_dyn <- function(object, loc_err, margin, window_size) {
     stop("margin and window_size must both be odd.", call. = FALSE)
   }
 
-  # Sliding window: apply BGBvarbreak to each window
   all_results <- vector("list", n - window_size + 1)
 
   for (w in seq_len(n - window_size + 1)) {
@@ -48,10 +48,9 @@ dbgb_variance_dyn <- function(object, loc_err, margin, window_size) {
       x_coords = td$x[idx],
       y_coords = td$y[idx],
       time_mins = td$time_mins[idx],
-      loc_err = loc_err[idx],
+      location_error = location_error[idx],
       margin = margin
     )
-    # Last row of each window is a boundary — set to NA
     res[nrow(res), ] <- NA
 
     all_results[[w]] <- data.frame(
@@ -64,12 +63,10 @@ dbgb_variance_dyn <- function(object, loc_err, margin, window_size) {
   combined <- do.call(rbind, all_results)
   combined <- combined[!is.na(combined$paraSd), ]
 
-  # Aggregate: RMS mean of SDs across windows
   agg <- aggregate(cbind(paraSd, orthSd) ~ seg, data = combined,
                    FUN = function(x) sqrt(mean(x^2)))
   n_estim_df <- aggregate(paraSd ~ seg, data = combined, FUN = length)
 
-  # Build output vectors
   para_sd <- rep(NA_real_, n)
   orth_sd <- rep(NA_real_, n)
   n_estim <- rep(NA_real_, n)
@@ -96,23 +93,23 @@ dbgb_variance_dyn <- function(object, loc_err, margin, window_size) {
         timestamps = mt_time(object)
       )
     ),
-    class = "dbgb_var"
+    class = "mt_dbgb_variance"
   )
 }
 
 #' @export
-print.dbgb_var <- function(x, ...) {
-  cat("Dynamic Bivariate Gaussian Bridge — variance estimate\n")
+print.mt_dbgb_variance <- function(x, ...) {
+  cat("Dynamic Bivariate Gaussian Bridge \u2014 variance estimate\n")
   cat(sprintf("  Locations: %d\n", x$track_data$n_locs))
   cat(sprintf("  Window size: %d, Margin: %d\n", x$window_size, x$margin))
-  cat(sprintf("  Parallel SD range: %.2f – %.2f\n",
+  cat(sprintf("  Parallel SD range: %.2f \u2013 %.2f\n",
               min(x$para_sd, na.rm = TRUE), max(x$para_sd, na.rm = TRUE)))
-  cat(sprintf("  Orthogonal SD range: %.2f – %.2f\n",
+  cat(sprintf("  Orthogonal SD range: %.2f \u2013 %.2f\n",
               min(x$orth_sd, na.rm = TRUE), max(x$orth_sd, na.rm = TRUE)))
   invisible(x)
 }
 
 #' @export
-get_motion_variance.dbgb_var <- function(x, ...) {
+mt_motion_variance.mt_dbgb_variance <- function(x, ...) {
   data.frame(para = x$para_sd^2, orth = x$orth_sd^2)
 }

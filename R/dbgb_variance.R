@@ -44,13 +44,13 @@ delta_para_orth <- function(mu, direction_point, point) {
 #' @param x_coords Numeric vector of x coordinates.
 #' @param y_coords Numeric vector of y coordinates.
 #' @param time_mins Numeric vector of timestamps in minutes.
-#' @param loc_err Numeric vector of location errors.
+#' @param location_error Numeric vector of location errors.
 #' @param sd_para Initial parallel SD (for optimization).
 #' @param sd_orth Initial orthogonal SD (for optimization).
 #'
 #' @return A list with `sd_para`, `sd_orth`, and `cll` (conditional log-likelihood).
 #' @keywords internal
-bgb_var_single <- function(x_coords, y_coords, time_mins, loc_err,
+bgb_var_single <- function(x_coords, y_coords, time_mins, location_error,
                            sd_para = NULL, sd_orth = NULL) {
   n <- length(x_coords)
   if ((n %% 2) != 1) stop("Need an odd number of locations for BGB variance")
@@ -69,8 +69,8 @@ bgb_var_single <- function(x_coords, y_coords, time_mins, loc_err,
   if (is.null(sd_para) || is.null(sd_orth)) {
     # Optimize both
     opt <- optim(c(1, 1), function(pars) {
-      errs <- alphas^2 * loc_err[is + 1]^2 +
-        (1 - alphas)^2 * loc_err[is - 1]^2
+      errs <- alphas^2 * location_error[is + 1]^2 +
+        (1 - alphas)^2 * location_error[is - 1]^2
       sd_mul <- alphas * (1 - alphas) * (time_mins[is + 1] - time_mins[is - 1])
       sp <- sqrt(errs + pars[1]^2 * sd_mul)
       so <- sqrt(errs + pars[2]^2 * sd_mul)
@@ -81,8 +81,8 @@ bgb_var_single <- function(x_coords, y_coords, time_mins, loc_err,
     sd_orth <- opt$par[2]
     cll <- -opt$value
   } else {
-    errs <- alphas^2 * loc_err[is + 1]^2 +
-      (1 - alphas)^2 * loc_err[is - 1]^2
+    errs <- alphas^2 * location_error[is + 1]^2 +
+      (1 - alphas)^2 * location_error[is - 1]^2
     sd_mul <- alphas * (1 - alphas) * (time_mins[is + 1] - time_mins[is - 1])
     sp <- sqrt(errs + sd_para^2 * sd_mul)
     so <- sqrt(errs + sd_orth^2 * sd_mul)
@@ -99,7 +99,7 @@ bgb_var_single <- function(x_coords, y_coords, time_mins, loc_err,
 #' breaks in parallel and orthogonal variance.
 #'
 #' @keywords internal
-bgb_var_break <- function(x_coords, y_coords, time_mins, loc_err, margin) {
+bgb_var_break <- function(x_coords, y_coords, time_mins, location_error, margin) {
   n <- length(x_coords)
   coords <- cbind(x_coords, y_coords)
 
@@ -111,7 +111,7 @@ bgb_var_break <- function(x_coords, y_coords, time_mins, loc_err, margin) {
   para_orth <- delta_para_orth(mus, coords[is + 1, , drop = FALSE],
                                 coords[is, , drop = FALSE])
 
-  errs <- alphas^2 * loc_err[is + 1]^2 + (1 - alphas)^2 * loc_err[is - 1]^2
+  errs <- alphas^2 * location_error[is + 1]^2 + (1 - alphas)^2 * location_error[is - 1]^2
   sd_mul <- alphas * (1 - alphas) * (time_mins[is + 1] - time_mins[is - 1])
 
   potential_breaks <- 2:(n - 1)

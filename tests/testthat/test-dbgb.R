@@ -1,4 +1,4 @@
-test_that("dbgb_variance_dyn returns expected structure", {
+test_that("mt_dbgb_variance returns expected structure", {
   skip_if_not_installed("move2")
   skip_if_not_installed("sf")
   library(move2)
@@ -12,10 +12,10 @@ test_that("dbgb_variance_dyn returns expected structure", {
     "+proj=aeqd +lon_0=", (bb["xmin"] + bb["xmax"]) / 2,
     " +lat_0=", (bb["ymin"] + bb["ymax"]) / 2, " +units=m")))
 
-  result <- dbgb_variance_dyn(leroy_proj, loc_err = 25,
+  result <- mt_dbgb_variance(leroy_proj, location_error = 25,
                                margin = 15, window_size = 31)
 
-  expect_s3_class(result, "dbgb_var")
+  expect_s3_class(result, "mt_dbgb_variance")
   expect_length(result$para_sd, nrow(leroy_proj))
   expect_length(result$orth_sd, nrow(leroy_proj))
   expect_true(any(!is.na(result$para_sd)))
@@ -24,7 +24,7 @@ test_that("dbgb_variance_dyn returns expected structure", {
   expect_true(all(result$orth_sd[!is.na(result$orth_sd)] >= 0))
 })
 
-test_that("get_motion_variance works on dbgb_var", {
+test_that("mt_motion_variance works on dbgb_var", {
   skip_if_not_installed("move2")
   skip_if_not_installed("sf")
   library(move2)
@@ -38,16 +38,16 @@ test_that("get_motion_variance works on dbgb_var", {
     "+proj=aeqd +lon_0=", (bb["xmin"] + bb["xmax"]) / 2,
     " +lat_0=", (bb["ymin"] + bb["ymax"]) / 2, " +units=m")))
 
-  var_obj <- dbgb_variance_dyn(leroy_proj, loc_err = 25,
+  var_obj <- mt_dbgb_variance(leroy_proj, location_error = 25,
                                 margin = 15, window_size = 31)
-  mv <- get_motion_variance(var_obj)
+  mv <- mt_motion_variance(var_obj)
   expect_true(is.data.frame(mv))
   expect_named(mv, c("para", "orth"))
   expect_equal(mv$para, var_obj$para_sd^2)
   expect_equal(mv$orth, var_obj$orth_sd^2)
 })
 
-test_that("dbgb_ud returns a SpatRaster that sums to 1", {
+test_that("mt_dbgb_ud returns a SpatRaster that sums to 1", {
   skip_if_not_installed("move2")
   skip_if_not_installed("sf")
   skip_if_not_installed("terra")
@@ -62,7 +62,7 @@ test_that("dbgb_ud returns a SpatRaster that sums to 1", {
     "+proj=aeqd +lon_0=", (bb["xmin"] + bb["xmax"]) / 2,
     " +lat_0=", (bb["ymin"] + bb["ymax"]) / 2, " +units=m")))
 
-  ud <- dbgb_ud(leroy_proj, loc_err = 25,
+  ud <- mt_dbgb_ud(leroy_proj, location_error = 25,
                  margin = 15, window_size = 31,
                  ext = 2.0, dim_size = 100)
 
@@ -70,7 +70,7 @@ test_that("dbgb_ud returns a SpatRaster that sums to 1", {
   expect_true(abs(sum(terra::values(ud), na.rm = TRUE) - 1) < 0.01)
 })
 
-test_that("dbgb_variance_dyn matches move package output", {
+test_that("mt_dbgb_variance matches move package output", {
   skip_if_not_installed("move2")
   skip_if_not_installed("sf")
 
@@ -84,12 +84,12 @@ test_that("dbgb_variance_dyn matches move package output", {
   ref <- readRDS(fixture_file)
   leroy_proj <- readRDS(test_path("fixtures", "leroy_projected.rds"))
 
-  result <- dbgb_variance_dyn(leroy_proj,
-                               loc_err = ref$location_error,
+  result <- mt_dbgb_variance(leroy_proj,
+                               location_error = ref$location_error,
                                margin = ref$margin,
                                window_size = ref$window_size)
 
-  mv <- get_motion_variance(result)
+  mv <- mt_motion_variance(result)
   valid_para <- !is.na(ref$para_var) & !is.na(mv$para)
   valid_orth <- !is.na(ref$orth_var) & !is.na(mv$orth)
 

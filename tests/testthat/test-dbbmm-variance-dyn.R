@@ -1,4 +1,4 @@
-test_that("dbbmm_variance_dyn rejects lon/lat input", {
+test_that("mt_dbbmm_variance rejects lon/lat input", {
   skip_if_not_installed("move2")
   skip_if_not_installed("sf")
   library(move2)
@@ -9,13 +9,13 @@ test_that("dbbmm_variance_dyn rejects lon/lat input", {
   fishers <- fishers[mt_track_id(fishers) == "F1", ]
 
   expect_error(
-    dbbmm_variance_dyn(fishers, location_error = 25,
+    mt_dbbmm_variance(fishers, location_error = 25,
                         window_size = 31, margin = 11),
     "projected CRS"
   )
 })
 
-test_that("dbbmm_variance_dyn works on projected data", {
+test_that("mt_dbbmm_variance works on projected data", {
   skip_if_not_installed("move2")
   skip_if_not_installed("sf")
   library(move2)
@@ -33,10 +33,10 @@ test_that("dbbmm_variance_dyn works on projected data", {
                               " +units=m"))
   leroy_proj <- st_transform(leroy, crs_aeqd)
 
-  result <- dbbmm_variance_dyn(leroy_proj, location_error = 25,
+  result <- mt_dbbmm_variance(leroy_proj, location_error = 25,
                                 window_size = 31, margin = 11)
 
-  expect_s3_class(result, "dbbmm_var")
+  expect_s3_class(result, "mt_dbbmm_variance")
   expect_length(result$variance, nrow(leroy_proj))
   expect_true(any(!is.na(result$variance)))
   expect_true(all(result$variance[!is.na(result$variance)] >= 0))
@@ -45,7 +45,7 @@ test_that("dbbmm_variance_dyn works on projected data", {
   expect_equal(result$margin, 11)
 })
 
-test_that("dbbmm_variance_dyn errors on even window_size", {
+test_that("mt_dbbmm_variance errors on even window_size", {
   skip_if_not_installed("move2")
   skip_if_not_installed("sf")
   library(move2)
@@ -60,13 +60,13 @@ test_that("dbbmm_variance_dyn errors on even window_size", {
     " +lat_0=", (bb["ymin"] + bb["ymax"]) / 2, " +units=m")))
 
   expect_error(
-    dbbmm_variance_dyn(leroy_proj, location_error = 25,
+    mt_dbbmm_variance(leroy_proj, location_error = 25,
                         window_size = 30, margin = 11),
     "must both be odd"
   )
 })
 
-test_that("dbbmm_variance_dyn errors when window larger than track", {
+test_that("mt_dbbmm_variance errors when window larger than track", {
   skip_if_not_installed("move2")
   skip_if_not_installed("sf")
   library(move2)
@@ -82,13 +82,13 @@ test_that("dbbmm_variance_dyn errors when window larger than track", {
     " +lat_0=", (bb["ymin"] + bb["ymax"]) / 2, " +units=m")))
 
   expect_error(
-    dbbmm_variance_dyn(tiny_proj, location_error = 25,
+    mt_dbbmm_variance(tiny_proj, location_error = 25,
                         window_size = 31, margin = 11),
     "cannot be larger"
   )
 })
 
-test_that("get_motion_variance works on dbbmm_var", {
+test_that("mt_motion_variance works on dbbmm_var", {
   skip_if_not_installed("move2")
   skip_if_not_installed("sf")
   library(move2)
@@ -102,13 +102,13 @@ test_that("get_motion_variance works on dbbmm_var", {
     "+proj=aeqd +lon_0=", (bb["xmin"] + bb["xmax"]) / 2,
     " +lat_0=", (bb["ymin"] + bb["ymax"]) / 2, " +units=m")))
 
-  var_obj <- dbbmm_variance_dyn(leroy_proj, location_error = 25,
+  var_obj <- mt_dbbmm_variance(leroy_proj, location_error = 25,
                                  window_size = 31, margin = 11)
-  mv <- get_motion_variance(var_obj)
+  mv <- mt_motion_variance(var_obj)
   expect_identical(mv, var_obj$variance)
 })
 
-test_that("dbbmm_variance_dyn matches move package output", {
+test_that("mt_dbbmm_variance matches move package output", {
   skip_if_not_installed("move2")
   skip_if_not_installed("sf")
 
@@ -122,7 +122,7 @@ test_that("dbbmm_variance_dyn matches move package output", {
   ref <- readRDS(fixture_file)
   leroy_proj <- readRDS(test_path("fixtures", "leroy_projected.rds"))
 
-  result <- dbbmm_variance_dyn(leroy_proj,
+  result <- mt_dbbmm_variance(leroy_proj,
                                 location_error = ref$location_error,
                                 window_size = ref$window_size,
                                 margin = ref$margin)
