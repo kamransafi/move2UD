@@ -9,6 +9,10 @@
 #' @param location_error Numeric scalar or vector of location errors.
 #' @param margin Integer (odd). Margin for breakpoint detection.
 #' @param window_size Integer (odd). Sliding window size.
+#' @param parallel Logical. If `TRUE`, use parallel processing for the
+#'   sliding window loop. Defaults to `FALSE`.
+#' @param cores Integer. Number of cores for parallel processing. Defaults
+#'   to `parallel::detectCores() - 1`.
 #'
 #' @return An `mt_dbgb_variance` object (S3 list) containing:
 #'   \describe{
@@ -27,7 +31,8 @@
 #' models. *Movement Ecology*, 2(1), 5.
 #'
 #' @export
-mt_dbgb_variance <- function(object, location_error, margin, window_size) {
+mt_dbgb_variance <- function(object, location_error, margin, window_size,
+                              parallel = FALSE, cores = NULL) {
   td <- .extract_track_data(object)
   n <- td$n_locs
 
@@ -40,9 +45,10 @@ mt_dbgb_variance <- function(object, location_error, margin, window_size) {
     stop("margin and window_size must both be odd.", call. = FALSE)
   }
 
-  all_results <- vector("list", n - window_size + 1)
+  n_windows <- n - window_size + 1
 
-  for (w in seq_len(n - window_size + 1)) {
+  # Function to process one window position
+  process_window <- function(w) {
     idx <- w:(w + window_size - 1)
     res <- bgb_var_break(
       x_coords = td$x[idx],
@@ -52,12 +58,16 @@ mt_dbgb_variance <- function(object, location_error, margin, window_size) {
       margin = margin
     )
     res[nrow(res), ] <- NA
+    data.frame(seg = idx, paraSd = res$paraSd, orthSd = res$orthSd)
+  }
 
-    all_results[[w]] <- data.frame(
-      seg = idx,
-      paraSd = res$paraSd,
-      orthSd = res$orthSd
-    )
+  # Process all windows — parallel or sequential
+  if (parallel && .Platform$OS.type != "windows") {
+    if (is.null(cores)) cores <- max(1, parallel::detectCores() - 1)
+    all_results <- parallel::mclapply(seq_len(n_windows), process_window,
+                                       mc.cores = cores)
+  } else {
+    all_results <- lapply(seq_len(n_windows), process_window)
   }
 
   combined <- do.call(rbind, all_results)
