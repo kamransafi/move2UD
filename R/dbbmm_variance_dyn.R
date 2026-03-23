@@ -12,6 +12,11 @@
 #'   sliding window.
 #' @param margin Integer (must be odd). The minimum number of locations on
 #'   each side of a potential breakpoint within a window.
+#' @param parallel Logical. If `TRUE`, use parallel processing for the
+#'   sliding window loop. Defaults to `FALSE`. Uses [parallel::mclapply()]
+#'   on Unix/macOS and sequential processing on Windows.
+#' @param cores Integer. Number of cores for parallel processing. Defaults
+#'   to `parallel::detectCores() - 1`.
 #'
 #' @return An `mt_dbbmm_variance` object (S3 list) containing:
 #'   \describe{
@@ -30,9 +35,11 @@
 #' The method estimates BM variance using a leave-one-out likelihood approach
 #' within a sliding window. At each window position, it tests whether a single
 #' variance or two variances (split at a breakpoint) better fit the data,
-#' using BIC for model selection. The window slides one position at a time
-#' across the entire trajectory, and the final variance for each segment is
-#' the mean across all windows that covered it.
+#' using BIC for model selection.
+#'
+#' The variance estimation and breakpoint testing are implemented in C for
+#' performance. The sliding window loop can optionally be parallelised across
+#' cores.
 #'
 #' @references
 #' Kranstauber, B., Kays, R., LaPoint, S. D., Wikelski, M., & Safi, K.
@@ -53,7 +60,8 @@
 #' }
 #'
 #' @export
-mt_dbbmm_variance <- function(object, location_error, window_size, margin) {
+mt_dbbmm_variance <- function(object, location_error, window_size, margin,
+                               parallel = FALSE, cores = NULL) {
   td <- .extract_track_data(object)
   n <- td$n_locs
 
@@ -72,57 +80,37 @@ mt_dbbmm_variance <- function(object, location_error, window_size, margin) {
     stop("window_size must be at least 2 * margin.", call. = FALSE)
   }
   uneven_breaks <- breaks_range[(breaks_range %% 2) == 1]
-  breaks_found <- c()
-  bm_vars <- data.frame(BMvar = numeric(0), loc = numeric(0))
 
-  for (w in 1:(n - window_size + 1)) {
+  n_windows <- n - window_size + 1
+
+  # Function to process one window position using C
+  process_window <- function(w) {
     idx <- w:(w - 1 + window_size)
-    x_sub <- td$x[idx]
-    y_sub <- td$y[idx]
-    tl_sub <- time_lag[idx]
-    le_sub <- location_error[idx]
-
-    whole <- bm_variance(time_lag = tl_sub, location_error = le_sub,
-                         x = x_sub, y = y_sub)
-    whole$BIC <- -2 * whole$cll + log(window_size)
-
-    break_best <- list(BIC = Inf)
-    for (b in uneven_breaks) {
-      before <- bm_variance(
-        x = x_sub[1:b], y = y_sub[1:b],
-        location_error = le_sub[1:b], time_lag = tl_sub[1:b]
-      )
-      after <- bm_variance(
-        x = x_sub[b:window_size], y = y_sub[b:window_size],
-        location_error = le_sub[b:window_size], time_lag = tl_sub[b:window_size]
-      )
-      bic_break <- -2 * (before$cll + after$cll) + 2 * log(window_size)
-      if (bic_break < break_best$BIC) {
-        break_best <- list(
-          w = w, b = b,
-          var_before = before$BMvar, var_after = after$BMvar,
-          BIC = bic_break
-        )
-      }
-    }
-
-    if (break_best$BIC < whole$BIC) {
-      window_vars <- c(
-        rep(break_best$var_before, sum(breaks_range < break_best$b)),
-        rep(break_best$var_after, sum(breaks_range > break_best$b))
-      )
-      breaks_found <- c(breaks_found, (w - 1 + break_best$b))
-    } else {
-      window_vars <- rep(whole$BMvar, length(breaks_range) - 1)
-    }
-
-    bm_vars <- rbind(bm_vars, data.frame(
-      BMvar = window_vars,
-      loc = w - 1 + margin:(window_size - margin)
-    ))
+    res <- .Call("bm_variance_window_c",
+                 td$x[idx], td$y[idx], time_lag[idx], location_error[idx],
+                 as.integer(uneven_breaks), as.integer(breaks_range))
+    list(
+      vars = res$vars,
+      locs = w - 1 + margin:(window_size - margin),
+      break_pos = if (res$has_break) w - 1 + res$break_pos else NULL
+    )
   }
 
-  agg <- aggregate(BMvar ~ loc, data = bm_vars,
+  # Process all windows — parallel or sequential
+  if (parallel && .Platform$OS.type != "windows") {
+    if (is.null(cores)) cores <- max(1, parallel::detectCores() - 1)
+    results <- parallel::mclapply(1:n_windows, process_window, mc.cores = cores)
+  } else {
+    results <- lapply(1:n_windows, process_window)
+  }
+
+  # Aggregate results
+  all_vars <- do.call(rbind, lapply(results, function(r) {
+    data.frame(BMvar = r$vars, loc = r$locs)
+  }))
+  breaks_found <- unlist(lapply(results, function(r) r$break_pos))
+
+  agg <- aggregate(BMvar ~ loc, data = all_vars,
                    FUN = function(x) c(mean = mean(x), length = length(x)))
   means_mat <- agg$BMvar
 
