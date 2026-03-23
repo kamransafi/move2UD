@@ -1,0 +1,35 @@
+Package: move2bb
+Title: Dynamic Brownian Bridge Movement Models for move2 Objects
+Version: 0.1.0
+Authors@R: c(
+    person("Bart", "Kranstauber", role = c("aut", "cre"), email = "b.kranstauber@uva.nl"),
+    person("Kamran", "Safi", role = "aut"),
+    person("Anne K.", "Scharf", role = "aut"),
+    person("Marco", "Smolla", role = "ctb"),
+    person("Claude", "AI", role = "ctb", comment = "Migration from move to move2/sf/terra"))
+Description: Dynamic Brownian Bridge Movement Models (dBBMM) and dynamic
+    Bivariate Gaussian Bridge (dBGB) models for estimating utilisation
+    distributions and movement variance from animal tracking data. This
+    package provides the dBBMM/dBGB functionality previously available in
+    the 'move' package, migrated to work with 'move2', 'sf', and 'terra'
+    objects. The C computational kernels are preserved from the original
+    implementation; the R interface layer has been rewritten for the
+    modern spatial stack.
+License: GPL (>= 3)
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Depends:
+    R (>= 4.1.0)
+Imports:
+    move2,
+    sf,
+    terra,
+    units,
+    methods
+Suggests:
+    dplyr,
+    ggplot2,
+    lubridate,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
