@@ -24,6 +24,8 @@ All dependencies are available on CRAN:
 
 ## Quick start
 
+### Single individual
+
 ```r
 library(move2UD)
 library(move2)
@@ -45,6 +47,36 @@ ud <- mt_dbbmm_ud(f1_proj, location_error = 25,
 terra::plot(ud, main = "Fisher F1 — dBBMM Utilisation Distribution")
 ```
 
+### Multiple individuals
+
+All functions accept multi-track `move2` objects directly. Variance functions return a named list (one result per track); UD functions return a multi-layer `SpatRaster` on a common grid.
+
+```r
+# Prepare all individuals
+fishers_proj <- st_transform(fishers, mt_aeqd_crs(fishers))
+
+# Estimate variance for all tracks at once
+variances <- mt_dbbmm_variance(fishers_proj, location_error = 25,
+                                window_size = 31, margin = 11)
+# Named list — one mt_dbbmm_variance object per track
+names(variances)
+#> [1] "F1" "F2" "F3" "M1" "M2" "M3" "M4" "M5"
+
+# Compute UDs on a common grid (multi-layer SpatRaster)
+uds <- mt_dbbmm_ud(variances, location_error = 25)
+terra::nlyr(uds)
+#> [1] 8
+
+# Plot one individual
+terra::plot(uds[["F1"]], main = "Fisher F1")
+
+# Or one-step from move2 object directly
+uds <- mt_dbbmm_ud(fishers_proj, location_error = 25,
+                    window_size = 31, margin = 11)
+```
+
+Tracks with too few locations for the given `window_size` are skipped with a warning.
+
 ## Functions
 
 ### Variance estimation
@@ -58,7 +90,7 @@ terra::plot(ud, main = "Fisher F1 — dBBMM Utilisation Distribution")
 
 | Function | Description |
 |---|---|
-| `mt_dbbmm_ud()` | Compute a dBBMM utilisation distribution. Accepts a `move2` object directly (estimates variance internally) or a pre-computed `mt_dbbmm_variance` object |
+| `mt_dbbmm_ud()` | Compute a dBBMM utilisation distribution. Accepts a `move2` object, an `mt_dbbmm_variance` object, or a named list of variance objects (for multi-track) |
 | `mt_dbgb_ud()` | Compute a dBGB utilisation distribution. Same interface as `mt_dbbmm_ud()` |
 
 ### Accessors
@@ -133,41 +165,58 @@ terra::plot(ud_bgb)
 | `margin` | Minimum locations on each side of a breakpoint (must be odd) | Must be < `window_size / 2`. Larger = more robust breakpoints |
 | `ext` | Extension factor for auto-generated raster extent | Increase if you get "grid not large enough" errors |
 | `dim_size` | Number of cells along the longest axis of the raster | Higher = finer resolution, slower computation |
+| `parallel` | Use parallel processing for the sliding window | `TRUE` uses `mclapply` on Unix/macOS; falls back to sequential on Windows |
 
 ### Input requirements
 
-All functions validate their input and produce informative error messages. The requirements are:
+All functions validate their input and produce informative error messages:
 
-- **Single track**: The `move2` object must contain exactly one individual. Filter first with `dplyr::filter()` or process tracks in a loop.
-- **Projected CRS**: Must not be longitude/latitude. Use `move2::mt_aeqd_crs()` for an azimuthal equidistant projection centred on the data:
+- **Projected CRS**: Must not be longitude/latitude. Use `move2::mt_aeqd_crs()`:
   ```r
   data_proj <- st_transform(data, mt_aeqd_crs(data))
   ```
-- **No empty geometries**: Remove failed GPS fixes first: `data <- data[!sf::st_is_empty(data), ]`
-- **Ordered, unique timestamps**: Data must be sorted by time with no duplicate timestamps. Use `move2::mt_filter_unique()` if needed.
-- **Positive location error**: `location_error` must be > 0 (not zero).
-- **Window/margin constraints**: `window_size` and `margin` must be odd, and `window_size >= 2 * margin + 1`.
+- **No empty geometries**: Remove failed GPS fixes: `data <- data[!sf::st_is_empty(data), ]`
+- **Ordered, unique timestamps**: Sort by time, no duplicates. Use `move2::mt_filter_unique()` if needed.
+- **Positive location error**: `location_error` must be > 0.
+- **Window/margin constraints**: Both must be odd; `window_size >= 2 * margin + 1`.
+
+Single-track and multi-track input are both accepted. Multi-track objects are split internally and processed per-track.
 
 ## Output
 
-Variance functions return S3 objects (`mt_dbbmm_variance` or `mt_dbgb_variance`) that contain the estimated variances, breakpoint information, and the original track coordinates.
+### Variance
 
-UD functions return a `terra::SpatRaster` where cell values sum to 1.0, representing the probability of the animal being in each cell. Standard `terra` functions work directly:
+- **Single track**: an `mt_dbbmm_variance` or `mt_dbgb_variance` S3 object.
+- **Multiple tracks**: a named list of variance objects, one per track.
+
+### Utilisation distributions
+
+- **Single track**: a `terra::SpatRaster` where cell values sum to 1.0.
+- **Multiple tracks**: a multi-layer `terra::SpatRaster` on a common grid, one layer per track. Each layer sums to 1.0.
+
+Standard `terra` functions work directly on the output:
 
 ```r
-# Plot
 terra::plot(ud)
-
-# Extract contours (e.g., 95% UD)
-terra::as.contour(ud, levels = 0.95)
-
-# Write to file
 terra::writeRaster(ud, "fisher_ud.tif")
 
-# Get volume (cumulative probability)
-ud_sorted <- sort(terra::values(ud), decreasing = TRUE)
-ud_cumsum <- cumsum(ud_sorted)
+# For multi-track: access individual layers
+terra::plot(uds[["F1"]])
+terra::plot(uds[["M1"]])
 ```
+
+## Performance
+
+The package includes several performance optimisations over the original `move` implementation:
+
+| Optimisation | Speedup | Applies to |
+|---|---|---|
+| C Brent's method optimizer | ~9x | dBBMM variance estimation |
+| Parallel sliding window (`mclapply`) | ~2x additional | dBBMM and dBGB variance |
+| OpenMP grid parallelisation | ~13x | UD raster computation |
+| Sequential break search (O(n) vs O(n²)) | ~1.5x | dBGB variance estimation |
+
+Combined speedup over `move`: **10-19x for dBBMM**, **5x for dBGB**.
 
 ## Migration from `move`
 
@@ -183,10 +232,11 @@ If you previously used the `move` package, the mapping is:
 | `spTransform(x, center=TRUE)` | `sf::st_transform(x, move2::mt_aeqd_crs(x))` |
 
 Key differences:
-- Input is a `move2` object (not `Move`/`MoveStack`)
-- Output UD is a `terra::SpatRaster` (not `RasterLayer`)
-- Variance objects are S3 lists (not S4 classes inheriting from `SpatialPointsDataFrame`)
-- Parameter names use `snake_case`: `location_error` (not `location.error`), `window_size` (not `window.size`)
+- Input: `move2` object (not `Move`/`MoveStack`)
+- Output UD: `terra::SpatRaster` (not `RasterLayer`)
+- Multi-track: named list of variances + stacked `SpatRaster` for UDs (not S4 `DBBMMStack`)
+- Parameter names: `snake_case` — `location_error`, `window_size`
+- Performance: 5-19x faster than `move`
 
 ## References
 

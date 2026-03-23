@@ -58,6 +58,21 @@ Simple S3 lists replacing the old `move` S4 hierarchy:
 - **`mt_dbgb_variance`**: `para_sd`, `orth_sd`, `n_estim`, `seg_interest`, `margin`, `window_size`, `track_data`
 - **UD output**: plain `terra::SpatRaster` (values sum to 1.0)
 
+### Multi-track handling
+
+All exported functions accept both single-track and multi-track `move2` objects:
+
+- **Variance functions**: Multi-track input is split internally via `.split_tracks()`. Each track is processed independently. Returns a named list of variance objects. Tracks with too few locations are skipped with a warning.
+- **UD functions**: Accept a named list of variance objects (from multi-track variance). Compute a common raster grid from the combined extent of all tracks. Return a multi-layer `terra::SpatRaster` with one layer per track, each summing to 1.0.
+- **One-step from move2**: `mt_dbbmm_ud(multi_track_move2, ...)` estimates variance per track, then computes stacked UDs.
+- **S3 dispatch**: UD functions have methods for `move2`, `mt_dbbmm_variance`/`mt_dbgb_variance`, and `list`.
+
+Key internal helpers:
+- `.validate_move2()`: common checks (is move2, projected CRS, no empty geometries)
+- `.split_tracks()`: splits multi-track object, validates each track individually
+- `.extract_track_data()`: single-track extraction (called after splitting)
+- `.run_lapply()`: centralised parallel/sequential dispatch
+
 ### Input validation
 
 `.extract_track_data()` performs comprehensive validation on every call:
@@ -123,7 +138,7 @@ Suggested: `parallel` (for `mclapply`), `testthat` (>= 3.0.0)
 ## Testing
 
 ### Current state
-70 tests, 0 failures, 0 warnings.
+80 tests, 0 failures, 0 warnings.
 
 ### Test files
 | File | Tests | Purpose |
@@ -134,7 +149,7 @@ Suggested: `parallel` (for `mclapply`), `testthat` (>= 3.0.0)
 | `test-dbbmm-variance-dyn.R` | 6 | Variance: projected data, lon/lat rejection, even window, too-small track, accessor, equivalence with `move` |
 | `test-dbbmm-ud.R` | 3 | UD: returns SpatRaster summing to 1, pre-computed variance, cell size |
 | `test-dbgb.R` | 4 | dBGB: variance structure, accessor, UD normalisation, equivalence with `move` |
-| `test-input-validation.R` | 5 | Multi-track, empty geometries, lon/lat, window/margin, non-move2 input |
+| `test-input-validation.R` | 7 | Multi-track list return, multi-track stacked UD, track skipping with warning, empty geometries, lon/lat, window/margin, non-move2 |
 
 ### Numerical equivalence
 Tests compare against reference fixtures (`.rds` files in `tests/testthat/fixtures/`) generated from the `move` package. Tolerance is 1% to account for projection centering differences between `sp::spTransform(center=TRUE)` and `sf::st_transform()` with custom AEQD.
@@ -166,10 +181,9 @@ Benchmarks on fisher F1 (1349 locations, 8 cores):
 
 1. **Roxygen documentation** — full `@param`, `@return`, `@examples` for all exported functions. Currently missing `.Rd` files (R CMD check WARNING)
 2. **S3 method signature alignment** — ensure method signatures match generics (R CMD check WARNING)
-3. **Vignette** — worked example from `move2` object to UD plot
-4. **Multi-track convenience** — wrapper that loops over tracks and returns a list of UDs
-5. **dBGB C optimizer** — move the L-BFGS-B optimization in `bgb_var_break()` to C for further speedup (currently the dBGB bottleneck)
-6. **`\donttest` examples** — convert from `\dontrun` so examples are checked during `R CMD check --run-donttest`
+3. **Vignette** — worked example from `move2` object to UD plot, showing single-track and multi-track workflows
+4. **dBGB C optimizer** — move the L-BFGS-B optimization in `bgb_var_break()` to C for further speedup (currently the dBGB bottleneck)
+5. **`\donttest` examples** — convert from `\dontrun` so examples are checked during `R CMD check --run-donttest`
 
 ## Authoritative references
 
