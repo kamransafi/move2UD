@@ -61,10 +61,10 @@ mt_dbgb_ud.mt_dbgb_variance <- function(object,
   n <- td$n_locs
   location_error <- .expand_loc_error(location_error, n)
 
-  # Include both endpoints of interested segments:
-  # a segment between positions i and i+1 needs both positions present
-  si <- object$seg_interest
-  points_interest <- si | c(FALSE, si[-length(si)])
+  # Match original move package: include positions where either the
+  # segment interest flag or its mirror is TRUE. This ensures symmetric
+  # margin handling for the bridge computation.
+  points_interest <- object$seg_interest | rev(object$seg_interest)
 
   if (is.null(raster)) {
     pts <- sf::st_as_sf(
