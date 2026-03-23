@@ -28,8 +28,8 @@ dbgb_ud <- function(object,
                     loc_err,
                     margin = 15,
                     window_size = 31,
-                    ext = 0.3,
-                    dim_size = 10,
+                    ext = 0.5,
+                    dim_size = 100,
                     time_step = NULL) {
   UseMethod("dbgb_ud")
 }
@@ -40,8 +40,8 @@ dbgb_ud.move2 <- function(object,
                            loc_err,
                            margin = 15,
                            window_size = 31,
-                           ext = 0.3,
-                           dim_size = 10,
+                           ext = 0.5,
+                           dim_size = 100,
                            time_step = NULL) {
   var_obj <- dbgb_variance_dyn(object, loc_err = loc_err,
                                 margin = margin, window_size = window_size)
@@ -53,8 +53,8 @@ dbgb_ud.move2 <- function(object,
 dbgb_ud.dbgb_var <- function(object,
                               raster = NULL,
                               loc_err,
-                              ext = 0.3,
-                              dim_size = 10,
+                              ext = 0.5,
+                              dim_size = 100,
                               time_step = NULL,
                               ...) {
   td <- object$track_data

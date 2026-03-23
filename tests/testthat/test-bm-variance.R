@@ -24,19 +24,19 @@ test_that("bm_variance with zero movement gives low variance", {
   expect_true(result$BMvar < 1)
 })
 
-test_that("bm_variance increases with more movement", {
+test_that("bm_variance increases with more tortuous movement", {
   time_lag <- c(10, 10, 10, 10, 10)
   loc_err <- rep(10, 5)
 
-  # Slow movement
-  r_slow <- move2UD:::bm_variance(time_lag, loc_err,
-                                   x = c(0, 10, 20, 30, 40),
-                                   y = c(0, 0, 0, 0, 0))
-  # Fast movement
-  r_fast <- move2UD:::bm_variance(time_lag, loc_err,
-                                   x = c(0, 1000, 2000, 3000, 4000),
-                                   y = c(0, 0, 0, 0, 0))
-  expect_true(r_fast$BMvar > r_slow$BMvar)
+  # Straight movement — leave-one-out deviation is low
+  r_straight <- move2UD:::bm_variance(time_lag, loc_err,
+                                       x = c(0, 100, 200, 300, 400),
+                                       y = c(0, 0, 0, 0, 0))
+  # Tortuous movement — leave-one-out deviation is high
+  r_tortuous <- move2UD:::bm_variance(time_lag, loc_err,
+                                       x = c(0, 100, 0, 100, 0),
+                                       y = c(0, 100, 0, 100, 0))
+  expect_true(r_tortuous$BMvar > r_straight$BMvar)
 })
 
 test_that("bm_variance errors on unequal input lengths", {
