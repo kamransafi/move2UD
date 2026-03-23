@@ -121,7 +121,7 @@ mt_dbbmm_ud.mt_dbbmm_variance <- function(object,
   sigma[is.na(sigma)] <- 0
 
   ans <- .Call(
-    "dbbmm2",
+    "dbbmm2_omp",
     td$x, td$y, sigma,
     (td$time_mins - min(td$time_mins)),
     location_error, x_grid, y_grid,

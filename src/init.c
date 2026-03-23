@@ -12,12 +12,18 @@ extern SEXP llBGBvar(SEXP, SEXP);
 extern SEXP bm_variance_c(SEXP, SEXP, SEXP, SEXP);
 extern SEXP bm_variance_window_c(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 
+/* OpenMP-parallelised grid kernels */
+extern SEXP dbbmm2_omp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP bgb_omp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+
 static const R_CallMethodDef CallEntries[] = {
     {"bgb",                  (DL_FUNC) &bgb,                  10},
     {"dbbmm2",               (DL_FUNC) &dbbmm2,               10},
     {"llBGBvar",             (DL_FUNC) &llBGBvar,              2},
     {"bm_variance_c",        (DL_FUNC) &bm_variance_c,         4},
     {"bm_variance_window_c", (DL_FUNC) &bm_variance_window_c,  6},
+    {"dbbmm2_omp",           (DL_FUNC) &dbbmm2_omp,           10},
+    {"bgb_omp",              (DL_FUNC) &bgb_omp,              10},
     {NULL, NULL, 0}
 };
 

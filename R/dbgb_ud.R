@@ -91,7 +91,7 @@ mt_dbgb_ud.mt_dbgb_variance <- function(object,
   y_grid <- sort(unique(terra::yFromRow(raster, 1:terra::nrow(raster))))
 
   ans <- .Call(
-    "bgb",
+    "bgb_omp",
     td$x[points_interest], td$y[points_interest],
     para_sd[points_interest], orth_sd[points_interest],
     t_mins[points_interest],
