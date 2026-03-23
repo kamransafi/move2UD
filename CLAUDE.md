@@ -4,7 +4,7 @@
 
 `move2UD` is an R package that provides dynamic Brownian Bridge Movement Model (dBBMM) and dynamic Bivariate Gaussian Bridge (dBGB) functionality for the `move2`/`sf`/`terra` ecosystem. It migrates the core UD estimation and movement variance algorithms from the `move` package (which depends on the retired `sp`/`raster` stack) into the modern spatial framework.
 
-The package is authored by Bart Kranstauber, Kamran Safi, and Anne K. Scharf — the same team behind `move2`. The C computational kernels are preserved from the original `move` implementation; the R interface layer has been rewritten.
+The package is authored by Bart Kranstauber, Kamran Safi, and Anne K. Scharf — the same team behind `move2`.
 
 **GitHub repository**: https://github.com/kamransafi/move2UD
 
@@ -16,146 +16,160 @@ This package was spun off from the book project "Analysing and Mapping of Animal
 
 ### C layer (numerical core)
 
-The heavy computation is in C, preserved verbatim from the `move` package:
-
 | File | Function | Purpose |
 |------|----------|---------|
-| `src/bgb_bbmm.c` | `dbbmm2()` | Isotropic dBBMM grid computation — evaluates Brownian bridge probability density on a raster grid |
-| `src/bgb_bbmm.c` | `bgb()` | Anisotropic BGB grid computation — decomposes into parallel/orthogonal components per grid cell |
-| `src/bgbVar.c` | `llBGBvar()` | Bivariate Gaussian log-likelihood for BGB variance optimisation |
-| `src/init.c` | — | Native routine registration |
+| `src/bgb_bbmm.c` | `dbbmm2()`, `bgb()` | Original grid kernels from `move` — preserved as reference |
+| `src/bgb_bbmm_omp.c` | `dbbmm2_omp()`, `bgb_omp()` | **OpenMP-parallelised** versions used in production. Inner grid loops parallelised with `#pragma omp parallel for collapse(2)`. Guarded with `#ifdef _OPENMP` for CRAN compatibility |
+| `src/bm_variance_c.c` | `bm_variance_c()`, `bm_variance_window_c()` | **C implementation of BM variance estimation**. Brent's method optimizer replaces R's `optimize()`. Processes entire sliding window (whole window + all breakpoints) in one `.Call()` |
+| `src/bgbVar.c` | `llBGBvar()` | Bivariate Gaussian log-likelihood for BGB variance optimisation (from `move`) |
+| `src/init.c` | — | Native routine registration for all 7 C functions |
+| `src/Makevars` | — | Compiler flags: `$(SHLIB_OPENMP_CFLAGS)` for OpenMP support |
 
-These C functions take raw numeric vectors (coordinates, variances, times, grid coordinates) and return numeric matrices. They have **no dependency on any R spatial package** — all coupling to spatial objects is in the R layer.
+All C functions take raw numeric vectors and return numeric matrices. They have **no dependency on any R spatial package**.
 
 ### R layer (interface)
 
 | File | Exports | Purpose |
 |------|---------|---------|
-| `R/bm_variance.R` | `bm_variance()` (internal) | Core leave-one-out likelihood BM variance estimation |
-| `R/dbbmm_variance_dyn.R` | `mt_dbbmm_variance()`, `mt_motion_variance()` | Dynamic sliding-window variance with BIC breakpoint detection |
-| `R/dbbmm_ud.R` | `mt_dbbmm_ud()` | dBBMM utilisation distribution computation |
-| `R/dbgb_variance.R` | `delta_para_orth()`, `bgb_var_single()`, `bgb_var_break()` (internal) | BGB parallel/orthogonal decomposition and breakpoint detection |
-| `R/dbgb_variance_dyn.R` | `mt_dbgb_variance()` | Dynamic BGB variance estimation |
-| `R/dbgb_ud.R` | `mt_dbgb_ud()` | dBGB utilisation distribution computation |
-| `R/utils.R` | internal helpers | `.extract_track_data()`, `.expand_loc_error()`, `.extcalc()`, `.make_raster()` |
+| `R/utils.R` | internal helpers | `.extract_track_data()` (validates and extracts from move2), `.expand_loc_error()`, `.extcalc()`, `.make_raster()` |
+| `R/bm_variance.R` | `bm_variance()` (internal) | Pure R reference implementation of BM variance estimation. Superseded by C version but retained for testing |
+| `R/dbbmm_variance_dyn.R` | `mt_dbbmm_variance()`, `mt_motion_variance()` | Dynamic sliding-window variance with BIC breakpoint detection. Uses C kernel. Supports `parallel` and `cores` parameters |
+| `R/dbbmm_ud.R` | `mt_dbbmm_ud()` | dBBMM utilisation distribution. Uses OpenMP kernel `dbbmm2_omp` |
+| `R/dbgb_variance.R` | `delta_para_orth()`, `bgb_var_single()`, `bgb_var_break()` (internal) | BGB parallel/orthogonal decomposition and breakpoint detection. Uses sequential break search (O(n) instead of O(n²)) |
+| `R/dbgb_variance_dyn.R` | `mt_dbgb_variance()` | Dynamic BGB variance. Supports `parallel` and `cores` parameters |
+| `R/dbgb_ud.R` | `mt_dbgb_ud()` | dBGB utilisation distribution. Uses OpenMP kernel `bgb_omp` |
 
 ### Naming conventions
 
 All exported functions follow the `move2` naming pattern:
 
-- **`mt_` prefix** for all functions (matches `move2` convention: `mt_speed()`, `mt_distance()`, etc.)
-- **Method abbreviation**: `dbbmm` / `dbgb` (well-known in movement ecology)
+- **`mt_` prefix** for all functions (matches `move2`: `mt_speed()`, `mt_distance()`, etc.)
+- **Method abbreviation**: `dbbmm` / `dbgb`
 - **`_variance` / `_ud`**: the computation type
-- **`mt_motion_variance()`**: accessor following the `mt_` + noun pattern (like `mt_time()`, `mt_track_data()`)
-- **`location_error`**: consistent parameter name across all functions (not `loc_err`)
+- **`mt_motion_variance()`**: accessor following `mt_` + noun pattern
+- **`location_error`**: consistent parameter name across all functions
+- No naming collisions with `sf` (`st_` prefix), `terra` (no prefix), or `move2` (`mt_` prefix)
 
 ### Object model
 
-The old `move` package used a deep S4 class hierarchy (`dBMvariance` → `.MoveTrackSingle` → `SpatialPointsDataFrame`, `DBBMM` → `.UD` → `RasterLayer`). This package uses simple S3 lists:
+Simple S3 lists replacing the old `move` S4 hierarchy:
 
-- **`mt_dbbmm_variance`**: list with `variance`, `in_windows`, `interest`, `break_list`, `window_size`, `margin`, `track_data`
-- **`mt_dbgb_variance`**: list with `para_sd`, `orth_sd`, `n_estim`, `seg_interest`, `margin`, `window_size`, `track_data`
-- **UD output**: plain `terra::SpatRaster` (no custom class — use `terra` functions directly)
+- **`mt_dbbmm_variance`**: `variance`, `in_windows`, `interest`, `break_list`, `window_size`, `margin`, `track_data`
+- **`mt_dbgb_variance`**: `para_sd`, `orth_sd`, `n_estim`, `seg_interest`, `margin`, `window_size`, `track_data`
+- **UD output**: plain `terra::SpatRaster` (values sum to 1.0)
 
-### CRS handling
+### Input validation
 
-Users should project their data before calling any `move2UD` function. The recommended approach uses `move2::mt_aeqd_crs()`:
+`.extract_track_data()` performs comprehensive validation on every call:
 
-```r
-data_proj <- sf::st_transform(data, move2::mt_aeqd_crs(data))
-```
+- Must be a `move2` object (`mt_is_move2()`)
+- Must contain exactly one track (`mt_n_tracks() == 1`)
+- Must be in a projected CRS (not lon/lat)
+- No empty geometries (`st_is_empty()`)
+- No NaN/NA/Inf coordinates
+- Timestamps must be chronologically ordered
+- No duplicate timestamps
 
-This creates an azimuthal equidistant projection centred on the data, matching what the old `move::spTransform(x, center=TRUE)` did.
+Additional validation in the variance functions:
+- `location_error` must be positive, no NAs, correct length
+- `window_size` and `margin` must be odd
+- `window_size >= 2 * margin + 1`
+
+UD functions validate that the grid computation produces finite results.
 
 ## Build and check
 
 ```bash
-# Build
 R CMD build .
-
-# Check
+R CMD INSTALL move2UD_*.tar.gz
 R CMD check move2UD_*.tar.gz
 
 # Or in R:
-devtools::check()
+devtools::install()
 devtools::test()
+devtools::check()
 ```
 
 ### Dependencies
 
-All dependencies are on CRAN:
+All on CRAN:
 - `move2` — input objects
-- `sf` — spatial operations, coordinate extraction, CRS handling
+- `sf` — spatial operations, coordinate extraction, CRS handling, empty geometry detection
 - `terra` — raster output for utilisation distributions
 - `units` — physical units for time lags
-- `methods` — for `.Call()` to C routines
 
-Test dependencies: `testthat` (>= 3.0.0)
+Suggested: `parallel` (for `mclapply`), `testthat` (>= 3.0.0)
 
 ## Coding standards
 
 ### R code style
-- **snake_case** for all function and variable names (e.g., `dbbmm_variance_dyn`, `location_error`)
+- **snake_case** for all function and variable names
 - Internal functions prefixed with `.` (e.g., `.extract_track_data`)
 - Use `sf::st_coordinates()`, `move2::mt_time()`, etc. — never `sp::coordinates()` or `move::timestamps()`
 - Return `terra::SpatRaster` for raster outputs — never `raster::RasterLayer`
 - Use S3 classes and generics — no S4
 
 ### C code
-- The C kernels in `src/bgb_bbmm.c` and `src/bgbVar.c` are **preserved from the `move` package** and should not be modified unless fixing a bug or adding parallelisation (e.g., OpenMP). Any changes must preserve numerical equivalence with the original `move` implementation.
-- New C/C++ code (e.g., Rcpp reimplementations) should go in new files, not modify the originals.
+- Original kernels in `src/bgb_bbmm.c` and `src/bgbVar.c` are **preserved verbatim from `move`** as reference. Do not modify.
+- Production code uses `src/bgb_bbmm_omp.c` (OpenMP versions) and `src/bm_variance_c.c` (C variance estimation)
+- All OpenMP pragmas must be guarded with `#ifdef _OPENMP` for CRAN compatibility
+- `R_CheckUserInterrupt()` must not be called from within OpenMP parallel regions — call it in the outer sequential loop
 
-### Input validation
-- All user-facing functions must check that the input is a `move2` object in a projected CRS (not lon/lat)
-- `location_error` must be validated: positive, no NAs, correct length
-- `window_size` and `margin` must be odd
-- Informative error messages referencing what the user should do (e.g., "Transform to a projected CRS first using sf::st_transform()")
+### Input validation rules
+- All user-facing functions must call `.extract_track_data()` which performs all input checks
+- Error messages must tell the user what to do (e.g., "Remove them first: x <- x[!sf::st_is_empty(x), ]")
+- Never silently accept invalid input — always `stop()` with `call. = FALSE`
 
-## Testing strategy
+## Testing
 
-### Numerical equivalence tests
-The primary correctness criterion is that `move2UD` produces **identical numerical results** to the original `move` package functions for the same input data. Tests should:
+### Current state
+70 tests, 0 failures, 0 warnings.
 
-1. Load a test dataset as both a `move` object and a `move2` object
-2. Run the `move` function (e.g., `brownian.motion.variance.dyn()`) and the `move2UD` function (`dbbmm_variance_dyn()`)
-3. Compare results with `expect_equal()` using a tolerance appropriate for floating-point arithmetic (typically `tolerance = 1e-8`)
+### Test files
+| File | Tests | Purpose |
+|------|-------|---------|
+| `test-utils.R` | 6 | `.expand_loc_error`, `.extcalc`, `.make_raster` |
+| `test-bm-variance.R` | 4 | Core variance: structure, stationary, tortuous, input validation |
+| `test-delta-para-orth.R` | 5 | Geometric decomposition at 0°, 45°, 90°, multiple points, same location |
+| `test-dbbmm-variance-dyn.R` | 6 | Variance: projected data, lon/lat rejection, even window, too-small track, accessor, equivalence with `move` |
+| `test-dbbmm-ud.R` | 3 | UD: returns SpatRaster summing to 1, pre-computed variance, cell size |
+| `test-dbgb.R` | 4 | dBGB: variance structure, accessor, UD normalisation, equivalence with `move` |
+| `test-input-validation.R` | 5 | Multi-track, empty geometries, lon/lat, window/margin, non-move2 input |
 
-This applies to:
-- Variance estimates (`dbbmm_variance_dyn` vs `brownian.motion.variance.dyn`)
-- UD raster values (`dbbmm_ud` vs `brownian.bridge.dyn`)
-- BGB parallel/orthogonal variances (`dbgb_variance_dyn` vs `dynBGBvariance`)
-- BGB UD values (`dbgb_ud` vs `dynBGB`)
+### Numerical equivalence
+Tests compare against reference fixtures (`.rds` files in `tests/testthat/fixtures/`) generated from the `move` package. Tolerance is 1% to account for projection centering differences between `sp::spTransform(center=TRUE)` and `sf::st_transform()` with custom AEQD.
 
-### Unit tests for components
-- `bm_variance()`: known inputs → known likelihood and variance
-- `delta_para_orth()`: geometric decomposition with simple test cases (0°, 45°, 90° angles)
-- `.extract_track_data()`: correct extraction from move2 objects; error on lon/lat
-- `.expand_loc_error()`: scalar expansion, length mismatch error, NA error
-- `.make_raster()`: correct extent, resolution, CRS propagation
-- `get_motion_variance()`: correct accessor for both `dbbmm_var` and `dbgb_var`
+To regenerate fixtures (requires both `move` and `move2` installed):
+```r
+source("tests/testthat/helper-generate-fixtures.R")
+generate_fixtures()
+```
 
-### Edge case tests
-- Single-individual vs multi-individual input (multi should error or be handled)
-- Very short tracks (fewer locations than window_size → informative error)
-- Tracks with irregular time intervals
-- Location error as scalar vs vector
-- Window size equal to track length (boundary case)
+## Performance
 
-### Performance regression tests
-- Benchmark key functions on a standard dataset and track execution time
-- Ensure performance improvements (parallelisation, Rcpp) don't change results
+Benchmarks on fisher F1 (1349 locations, 8 cores):
 
-### Test data
-Use `move2::mt_read(move2::mt_example())` as the primary test dataset (fisher data, bundled with `move2`). For numerical equivalence tests against `move`, also keep a small reference dataset with pre-computed `move` package results stored as `.rds` files in `tests/testthat/fixtures/`.
+| Operation | `move` (old) | `move2UD` | Speedup |
+|---|---|---|---|
+| dBBMM variance (w=31) | 5.0s | 0.46s (C + parallel) | **10.9x** |
+| dBBMM variance (w=71) | 14.2s | 0.74s (C + parallel) | **19.3x** |
+| dBBMM UD (dim=100) | 5.2s | 0.4s (OpenMP) | **12.9x** |
+| dBGB variance (w=31) | 30.1s | 6.1s (parallel) | **5.0x** |
 
-## Planned improvements (in order of priority)
+### Performance architecture
+1. **C Brent's method** (`bm_variance_c.c`): Replaces R's `optimize()` for BM variance — 8-9x speedup on inner loop
+2. **Parallel window loops**: `parallel::mclapply` for both dBBMM and dBGB variance — 2-2.5x additional
+3. **Sequential break search** for dBGB: O(n) instead of O(n²) — 1.5x algorithmic improvement
+4. **OpenMP grid kernels** (`bgb_bbmm_omp.c`): `#pragma omp parallel for collapse(2)` on inner cell loops — 12.9x for UD computation
 
-1. **Parallelise the window loop** — `parallel::mclapply` or `future.apply::future_lapply` for the sliding window in `dbbmm_variance_dyn()` and `dbgb_variance_dyn()`. Each window position is independent.
-2. **Rcpp reimplementation of `bm_variance()`** — the inner likelihood evaluation and optimisation are the main bottleneck. Moving from R's `optimize()` to a C++ Brent's method would give 10-50× speedup.
-3. **OpenMP in C kernels** — the inner grid loops in `dbbmm2()` and `bgb()` are trivially parallelisable.
-4. **Multi-track support** — accept `move2` objects with multiple tracks; process per-track and return a list or stack.
-5. **Roxygen documentation** — full `@param`, `@return`, `@examples` for all exported functions.
-6. **Vignette** — worked example from `move2` object to UD plot, showing both dBBMM and dBGB workflows.
+## Remaining work (in priority order)
+
+1. **Roxygen documentation** — full `@param`, `@return`, `@examples` for all exported functions. Currently missing `.Rd` files (R CMD check WARNING)
+2. **S3 method signature alignment** — ensure method signatures match generics (R CMD check WARNING)
+3. **Vignette** — worked example from `move2` object to UD plot
+4. **Multi-track convenience** — wrapper that loops over tracks and returns a list of UDs
+5. **dBGB C optimizer** — move the L-BFGS-B optimization in `bgb_var_break()` to C for further speedup (currently the dBGB bottleneck)
+6. **`\donttest` examples** — convert from `\dontrun` so examples are checked during `R CMD check --run-donttest`
 
 ## Authoritative references
 
