@@ -3,7 +3,8 @@
 #' @importFrom terra rast ext xFromCol yFromRow ncol nrow ncell values
 #' @importFrom units set_units as_units
 #' @importFrom stats aggregate optim optimize
-NULL
+#' @useDynLib move2UD, .registration = TRUE
+"_PACKAGE"
 
 #' Extract coordinates, timestamps, and time lags from a move2 object
 #'

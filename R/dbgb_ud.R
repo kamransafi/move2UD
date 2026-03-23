@@ -1,21 +1,60 @@
 #' Dynamic Bivariate Gaussian Bridge — Utilisation Distribution
 #'
 #' Compute a utilisation distribution using the dynamic bivariate Gaussian
-#' bridge model.
+#' bridge model, which decomposes movement variance into parallel and
+#' orthogonal components relative to the direction of travel.
 #'
-#' @param object A `move2` object (single or multi-track), an
-#'   `mt_dbgb_variance` object, or a named list of `mt_dbgb_variance` objects.
-#' @param raster A `terra::SpatRaster`, numeric cell size, or `NULL`.
-#' @param location_error Numeric scalar or vector of location errors.
-#' @param margin Integer (odd). Margin for variance window.
+#' @param object One of:
+#'   \itemize{
+#'     \item A `move2` object (single or multi-track, projected CRS).
+#'     \item An `mt_dbgb_variance` object from [mt_dbgb_variance()].
+#'     \item A named list of `mt_dbgb_variance` objects (multi-track).
+#'   }
+#' @param raster A `terra::SpatRaster` defining the output grid, a numeric
+#'   cell size in map units, or `NULL` to auto-compute.
+#' @param location_error Numeric scalar or vector of location errors in
+#'   map units. Must be positive.
+#' @param margin Integer (odd). Margin for variance estimation. Only used
+#'   when `object` is a `move2` object.
 #' @param window_size Integer (odd). Window size for variance estimation.
-#' @param ext Numeric. Extension factor for bounding box.
-#' @param dim_size Integer. Cells along longest dimension.
-#' @param time_step Numeric. Integration time step (minutes).
-#' @param verbose Logical. Print progress messages.
+#'   Only used when `object` is a `move2` object.
+#' @param ext Numeric. Extension factor for the bounding box. Default 0.5.
+#' @param dim_size Integer. Cells along the longest dimension. Default 100.
+#' @param time_step Numeric or `NULL`. Integration time step in minutes.
+#' @param verbose Logical. Print progress messages for multi-track.
 #'
-#' @return For single-track: a `terra::SpatRaster` (values sum to 1).
-#'   For multi-track: a multi-layer `terra::SpatRaster`, one layer per track.
+#' @return For single-track: a `terra::SpatRaster` (values sum to 1.0).
+#'   For multi-track: a multi-layer `terra::SpatRaster` on a common grid,
+#'   one named layer per track, each summing to 1.0.
+#'
+#' @details
+#' The dBGB UD uses an anisotropic Gaussian kernel at each time step,
+#' with the kernel elongated along the direction of travel. This produces
+#' narrower UDs along directed segments and wider UDs where movement is
+#' more random, better capturing the actual space use of the animal.
+#'
+#' @references
+#' Kranstauber, B., Safi, K., & Bartumeus, F. (2014). Bivariate Gaussian
+#' bridges: directional factorization of diffusion in Brownian bridge
+#' models. *Movement Ecology*, 2(1), 5. \doi{10.1186/2051-3933-2-5}
+#'
+#' @seealso [mt_dbgb_variance()] to compute variance separately,
+#'   [mt_dbbmm_ud()] for the isotropic variant.
+#'
+#' @examples
+#' \donttest{
+#' library(move2)
+#' library(sf)
+#'
+#' fishers <- mt_read(mt_example())
+#' fishers <- fishers[!st_is_empty(fishers), ]
+#' f1 <- fishers[mt_track_id(fishers) == "F1", ]
+#' f1_proj <- st_transform(f1, mt_aeqd_crs(f1))
+#'
+#' ud <- mt_dbgb_ud(f1_proj, location_error = 25,
+#'                   margin = 15, window_size = 31)
+#' terra::plot(ud)
+#' }
 #'
 #' @export
 mt_dbgb_ud <- function(object,

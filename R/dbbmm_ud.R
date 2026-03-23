@@ -1,25 +1,84 @@
 #' Dynamic Brownian Bridge Movement Model — Utilisation Distribution
 #'
 #' Compute a utilisation distribution (UD) from a movement track using
-#' the dynamic Brownian bridge movement model.
+#' the dynamic Brownian bridge movement model. Accepts a `move2` object
+#' directly (estimates variance internally), a pre-computed variance
+#' object, or a named list of variance objects for multi-track input.
 #'
-#' @param object A `move2` object (single or multi-track, projected CRS),
-#'   an `mt_dbbmm_variance` object, or a named list of `mt_dbbmm_variance`
-#'   objects (as returned by [mt_dbbmm_variance()] for multi-track input).
+#' @param object One of:
+#'   \itemize{
+#'     \item A `move2` object (single or multi-track, projected CRS).
+#'       Variance is estimated internally via [mt_dbbmm_variance()].
+#'     \item An `mt_dbbmm_variance` object from [mt_dbbmm_variance()].
+#'     \item A named list of `mt_dbbmm_variance` objects (multi-track).
+#'   }
 #' @param raster A `terra::SpatRaster` defining the output grid, or a
 #'   numeric scalar giving the cell size in map units, or `NULL` to
-#'   auto-compute.
-#' @param location_error Numeric scalar or vector of location errors.
-#' @param margin Integer (odd). Margin for variance estimation.
+#'   auto-compute from `dim_size` and `ext`. For multi-track input with
+#'   `NULL`, a common grid is computed from the combined extent.
+#' @param location_error Numeric scalar or vector of location errors in
+#'   map units. Must be positive.
+#' @param margin Integer (odd). Margin for variance estimation window.
+#'   Only used when `object` is a `move2` object.
 #' @param window_size Integer (odd). Window size for variance estimation.
-#' @param ext Numeric. Extension factor for the bounding box.
-#' @param dim_size Integer. Number of cells along the longest dimension.
-#' @param time_step Numeric. Time step for integration (in minutes).
-#' @param verbose Logical. Print computational size estimate.
+#'   Only used when `object` is a `move2` object.
+#' @param ext Numeric. Extension factor for the bounding box when
+#'   auto-creating the raster. Increase if the C kernel reports that the
+#'   grid is not large enough. Default 0.5.
+#' @param dim_size Integer. Number of cells along the longest dimension
+#'   of the auto-generated raster. Higher values give finer resolution
+#'   but slower computation. Default 100.
+#' @param time_step Numeric or `NULL`. Time step for the Brownian bridge
+#'   integration, in minutes. Defaults to 1/15 of the minimum time lag.
+#'   Smaller values give more precise UDs but are slower.
+#' @param verbose Logical. If `TRUE`, print a computational size estimate.
 #'
-#' @return For single-track input: a `terra::SpatRaster` (values sum to 1).
+#' @return For single-track input: a `terra::SpatRaster` where cell
+#'   values sum to 1.0, representing the utilisation distribution.
+#'
 #'   For multi-track input: a multi-layer `terra::SpatRaster` with one
-#'   layer per track, all on a common grid. Each layer sums to 1.
+#'   named layer per track, all on a common grid. Each layer sums to 1.0.
+#'
+#' @details
+#' The UD is computed by evaluating the Brownian bridge probability
+#' density at regular time steps along each segment and accumulating
+#' the density onto a raster grid. The computation is implemented in C
+#' with OpenMP parallelisation of the inner grid loops for performance.
+#'
+#' For multi-track input, a common raster grid is computed from the
+#' combined spatial extent of all tracks, ensuring that UDs are
+#' directly comparable.
+#'
+#' @references
+#' Kranstauber, B., Kays, R., LaPoint, S. D., Wikelski, M., & Safi, K.
+#' (2012). A dynamic Brownian bridge movement model to estimate utilization
+#' distributions for heterogeneous animal movement. *Journal of Animal
+#' Ecology*, 81(4), 738-746. \doi{10.1111/j.1365-2656.2012.01955.x}
+#'
+#' @seealso [mt_dbbmm_variance()] to compute variance separately,
+#'   [mt_dbgb_ud()] for the directional variant, [mt_motion_variance()]
+#'   to extract variances.
+#'
+#' @examples
+#' \donttest{
+#' library(move2)
+#' library(sf)
+#'
+#' fishers <- mt_read(mt_example())
+#' fishers <- fishers[!st_is_empty(fishers), ]
+#' f1 <- fishers[mt_track_id(fishers) == "F1", ]
+#' f1_proj <- st_transform(f1, mt_aeqd_crs(f1))
+#'
+#' # One-step
+#' ud <- mt_dbbmm_ud(f1_proj, location_error = 25,
+#'                    window_size = 31, margin = 11)
+#' terra::plot(ud)
+#'
+#' # Two-step (re-use variance for different raster settings)
+#' var_obj <- mt_dbbmm_variance(f1_proj, location_error = 25,
+#'                               window_size = 31, margin = 11)
+#' ud_fine <- mt_dbbmm_ud(var_obj, location_error = 25, dim_size = 500)
+#' }
 #'
 #' @export
 mt_dbbmm_ud <- function(object,

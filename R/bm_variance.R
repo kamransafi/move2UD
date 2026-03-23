@@ -11,9 +11,9 @@
 #' @return A list with `BMvar` (the estimated variance) and `cll` (the
 #'   conditional log-likelihood).
 #'
-#' @details This is the core variance estimation used internally by
-#'   [dbbmm_variance_dyn()]. It implements the leave-one-out approach
-#'   of Horne et al. (2007).
+#' @details This is the pure R reference implementation, superseded by
+#'   the C version in `bm_variance_c.c` for production use. It implements
+#'   the leave-one-out approach of Horne et al. (2007).
 #'
 #' @references
 #' Horne, J. S., Garton, E. O., Krone, S. M., & Lewis, J. S. (2007).

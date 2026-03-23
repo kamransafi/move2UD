@@ -1,18 +1,79 @@
 #' Dynamic Bivariate Gaussian Bridge Variance Estimation
 #'
 #' Estimate dynamic parallel and orthogonal movement variances using a
-#' sliding window approach with BIC-based breakpoint detection.
+#' sliding window approach with BIC-based breakpoint detection. The
+#' bivariate Gaussian bridge decomposes the movement variance into a
+#' component parallel to the direction of travel and one orthogonal to
+#' it, providing more detail about the movement process than the
+#' isotropic dBBMM.
 #'
-#' @param object A `move2` object (single or multi-track). Must be in a
-#'   projected coordinate system.
-#' @param location_error Numeric scalar or vector of location errors.
-#' @param margin Integer (odd). Margin for breakpoint detection.
-#' @param window_size Integer (odd). Sliding window size.
-#' @param parallel Logical. If `TRUE`, use parallel processing.
-#' @param cores Integer. Number of cores for parallel processing.
+#' @param object A `move2` object in a projected coordinate system (not
+#'   longitude/latitude). Use `sf::st_transform(x, move2::mt_aeqd_crs(x))`
+#'   to project. Both single-track and multi-track objects are accepted.
+#' @param location_error Numeric scalar or vector of location errors in
+#'   map units. Must be positive.
+#' @param margin Integer (must be odd). Minimum locations on each side of
+#'   a potential breakpoint.
+#' @param window_size Integer (must be odd). Number of locations in the
+#'   sliding window.
+#' @param parallel Logical. If `TRUE`, use parallel processing for the
+#'   sliding window. Defaults to `FALSE`.
+#' @param cores Integer or `NULL`. Number of cores for parallel processing.
 #'
-#' @return For single-track input: an `mt_dbgb_variance` object.
+#' @return For single-track input: an `mt_dbgb_variance` S3 object
+#'   containing:
+#'   \describe{
+#'     \item{`para_sd`}{Numeric vector of parallel standard deviations.}
+#'     \item{`orth_sd`}{Numeric vector of orthogonal standard deviations.}
+#'     \item{`n_estim`}{Number of windows each position was estimated in.}
+#'     \item{`seg_interest`}{Logical vector of fully-covered segments.}
+#'     \item{`margin`, `window_size`}{Parameters used.}
+#'     \item{`track_data`}{Coordinates, timestamps, CRS from the input.}
+#'   }
+#'
 #'   For multi-track input: a named list of `mt_dbgb_variance` objects.
+#'   Tracks with too few locations are skipped with a warning.
+#'
+#' @details
+#' The method extends the dBBMM by decomposing the variance into a
+#' parallel component (along the direction of travel between consecutive
+#' locations) and an orthogonal component (perpendicular to it). This
+#' allows distinguishing directed movement (high parallel, low orthogonal
+#' variance) from random movement (similar variances in both directions).
+#'
+#' A directionality index can be computed from the variances:
+#' `I_d = (para - orth) / (para + orth)`, where values near 0 indicate
+#' Brownian motion and positive values indicate directional movement.
+#'
+#' @references
+#' Kranstauber, B., Safi, K., & Bartumeus, F. (2014). Bivariate Gaussian
+#' bridges: directional factorization of diffusion in Brownian bridge
+#' models. *Movement Ecology*, 2(1), 5. \doi{10.1186/2051-3933-2-5}
+#'
+#' @seealso [mt_dbgb_ud()] to compute the UD, [mt_motion_variance()] to
+#'   extract variances as a data.frame, [mt_dbbmm_variance()] for the
+#'   isotropic variant.
+#'
+#' @examples
+#' \donttest{
+#' library(move2)
+#' library(sf)
+#'
+#' fishers <- mt_read(mt_example())
+#' fishers <- fishers[!st_is_empty(fishers), ]
+#' f1 <- fishers[mt_track_id(fishers) == "F1", ]
+#' f1_proj <- st_transform(f1, mt_aeqd_crs(f1))
+#'
+#' var_obj <- mt_dbgb_variance(f1_proj, location_error = 25,
+#'                              margin = 15, window_size = 31)
+#' var_obj
+#'
+#' # Directionality index
+#' mv <- mt_motion_variance(var_obj)
+#' I_d <- (mv$para - mv$orth) / (mv$para + mv$orth)
+#' plot(mt_time(f1_proj), I_d, type = "l",
+#'      xlab = "Time", ylab = "Directionality index")
+#' }
 #'
 #' @export
 mt_dbgb_variance <- function(object, location_error, margin, window_size,
@@ -129,6 +190,11 @@ mt_dbgb_variance <- function(object, location_error, margin, window_size,
   results
 }
 
+#' Print method for mt_dbgb_variance
+#'
+#' @param x An `mt_dbgb_variance` object.
+#' @param ... Ignored.
+#' @return `x`, invisibly.
 #' @export
 print.mt_dbgb_variance <- function(x, ...) {
   cat("Dynamic Bivariate Gaussian Bridge \u2014 variance estimate\n")
@@ -141,6 +207,7 @@ print.mt_dbgb_variance <- function(x, ...) {
   invisible(x)
 }
 
+#' @rdname mt_motion_variance
 #' @export
 mt_motion_variance.mt_dbgb_variance <- function(x, ...) {
   data.frame(para = x$para_sd^2, orth = x$orth_sd^2)
