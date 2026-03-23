@@ -22,4 +22,4 @@ importFrom(units, set_units, as_units)
 importFrom(stats, aggregate, optim, optimize)
 importFrom(grDevices, grey)
 
-useDynLib(move2bb, .registration = TRUE)
+useDynLib(move2UD, .registration = TRUE)

@@ -1,4 +1,4 @@
-Package: move2bb
+Package: move2UD
 Title: Dynamic Brownian Bridge Movement Models for move2 Objects
 Version: 0.1.0
 Authors@R: c(
