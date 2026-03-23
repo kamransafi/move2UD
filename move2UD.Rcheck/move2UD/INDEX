@@ -1,0 +1,14 @@
+move2UD-package         move2UD: Dynamic Brownian Bridge Movement
+                        Models for move2 Objects
+mt_dbbmm_ud             Dynamic Brownian Bridge Movement Model —
+                        Utilisation Distribution
+mt_dbbmm_variance       Dynamic Brownian Motion Variance Estimation
+mt_dbgb_ud              Dynamic Bivariate Gaussian Bridge — Utilisation
+                        Distribution
+mt_dbgb_variance        Dynamic Bivariate Gaussian Bridge Variance
+                        Estimation
+mt_motion_variance      Extract Motion Variance
+print.mt_dbbmm_variance
+                        Print method for mt_dbbmm_variance
+print.mt_dbgb_variance
+                        Print method for mt_dbgb_variance
