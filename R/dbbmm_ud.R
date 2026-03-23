@@ -3,48 +3,23 @@
 #' Compute a utilisation distribution (UD) from a movement track using
 #' the dynamic Brownian bridge movement model.
 #'
-#' @param object A `move2` object (single track, projected CRS) or an
-#'   `mt_dbbmm_variance` object from [mt_dbbmm_variance()].
+#' @param object A `move2` object (single or multi-track, projected CRS),
+#'   an `mt_dbbmm_variance` object, or a named list of `mt_dbbmm_variance`
+#'   objects (as returned by [mt_dbbmm_variance()] for multi-track input).
 #' @param raster A `terra::SpatRaster` defining the output grid, or a
 #'   numeric scalar giving the cell size in map units, or `NULL` to
-#'   auto-compute from `dim_size`.
+#'   auto-compute.
 #' @param location_error Numeric scalar or vector of location errors.
-#' @param margin Integer (odd). Margin for the variance estimation window.
+#' @param margin Integer (odd). Margin for variance estimation.
 #' @param window_size Integer (odd). Window size for variance estimation.
-#' @param ext Numeric. Extension factor for the bounding box when
-#'   auto-creating the raster.
-#' @param dim_size Integer. Number of cells along the longest dimension
-#'   (used when `raster` is NULL).
+#' @param ext Numeric. Extension factor for the bounding box.
+#' @param dim_size Integer. Number of cells along the longest dimension.
 #' @param time_step Numeric. Time step for integration (in minutes).
-#'   Defaults to 1/15 of the minimum time lag.
 #' @param verbose Logical. Print computational size estimate.
 #'
-#' @return A `terra::SpatRaster` containing the utilisation distribution
-#'   (values sum to 1).
-#'
-#' @details
-#' If `object` is a `move2` object, the variance is estimated first
-#' using [mt_dbbmm_variance()], then the UD is computed. If `object`
-#' is already an `mt_dbbmm_variance` object, the UD is computed directly.
-#'
-#' @references
-#' Kranstauber, B., Kays, R., LaPoint, S. D., Wikelski, M., & Safi, K.
-#' (2012). A dynamic Brownian bridge movement model to estimate utilization
-#' distributions for heterogeneous animal movement. *Journal of Animal
-#' Ecology*, 81(4), 738-746.
-#'
-#' @examples
-#' \dontrun{
-#' library(move2)
-#' library(sf)
-#' fishers <- mt_read(mt_example())
-#' fishers <- fishers[!st_is_empty(fishers), ]
-#' f1 <- fishers[mt_track_id(fishers) == "F1", ]
-#' f1_proj <- st_transform(f1, mt_aeqd_crs(f1))
-#' ud <- mt_dbbmm_ud(f1_proj, location_error = 25,
-#'                    window_size = 31, margin = 11)
-#' terra::plot(ud)
-#' }
+#' @return For single-track input: a `terra::SpatRaster` (values sum to 1).
+#'   For multi-track input: a multi-layer `terra::SpatRaster` with one
+#'   layer per track, all on a common grid. Each layer sums to 1.
 #'
 #' @export
 mt_dbbmm_ud <- function(object,
@@ -74,6 +49,51 @@ mt_dbbmm_ud.move2 <- function(object,
   mt_dbbmm_ud(var_obj, raster = raster, location_error = location_error,
                ext = ext, dim_size = dim_size, time_step = time_step,
                verbose = verbose)
+}
+
+#' @export
+mt_dbbmm_ud.list <- function(object,
+                               raster = NULL,
+                               location_error,
+                               ext = 0.5,
+                               dim_size = 100,
+                               time_step = NULL,
+                               verbose = TRUE,
+                               ...) {
+  # Validate: must be a named list of mt_dbbmm_variance objects
+  if (!all(vapply(object, inherits, logical(1), "mt_dbbmm_variance"))) {
+    stop("List must contain mt_dbbmm_variance objects.", call. = FALSE)
+  }
+
+  # Create a common grid from all tracks if not provided
+  if (is.null(raster) || (is.numeric(raster) && length(raster) == 1)) {
+    all_x <- unlist(lapply(object, function(v) v$track_data$x))
+    all_y <- unlist(lapply(object, function(v) v$track_data$y))
+    crs <- object[[1]]$track_data$crs
+    pts <- sf::st_as_sf(data.frame(x = all_x, y = all_y),
+                         coords = c("x", "y"), crs = crs)
+    if (is.numeric(raster)) {
+      common_raster <- .make_raster(pts, cell_size = raster, ext = ext)
+    } else {
+      common_raster <- .make_raster(pts, dim_size = dim_size, ext = ext)
+    }
+  } else {
+    common_raster <- raster
+  }
+
+  # Compute UD for each track on the common grid
+  layers <- lapply(names(object), function(nm) {
+    if (verbose) message("Computing UD for track: ", nm)
+    mt_dbbmm_ud(object[[nm]], raster = common_raster,
+                 location_error = location_error,
+                 ext = ext, dim_size = dim_size,
+                 time_step = time_step, verbose = FALSE)
+  })
+
+  # Stack into multi-layer SpatRaster
+  stk <- terra::rast(layers)
+  names(stk) <- names(object)
+  stk
 }
 
 #' @export

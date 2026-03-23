@@ -3,43 +3,42 @@
 #' Estimate dynamic parallel and orthogonal movement variances using a
 #' sliding window approach with BIC-based breakpoint detection.
 #'
-#' @param object A `move2` object containing a single track. Must be in a
-#'   projected coordinate system. Use [move2::mt_aeqd_crs()] to create
-#'   a suitable projection.
+#' @param object A `move2` object (single or multi-track). Must be in a
+#'   projected coordinate system.
 #' @param location_error Numeric scalar or vector of location errors.
 #' @param margin Integer (odd). Margin for breakpoint detection.
 #' @param window_size Integer (odd). Sliding window size.
-#' @param parallel Logical. If `TRUE`, use parallel processing for the
-#'   sliding window loop. Defaults to `FALSE`.
-#' @param cores Integer. Number of cores for parallel processing. Defaults
-#'   to `parallel::detectCores() - 1`.
+#' @param parallel Logical. If `TRUE`, use parallel processing.
+#' @param cores Integer. Number of cores for parallel processing.
 #'
-#' @return An `mt_dbgb_variance` object (S3 list) containing:
-#'   \describe{
-#'     \item{para_sd}{Numeric vector of parallel SD per position.}
-#'     \item{orth_sd}{Numeric vector of orthogonal SD per position.}
-#'     \item{n_estim}{Number of windows each position was estimated in.}
-#'     \item{seg_interest}{Logical vector of segments fully within the window.}
-#'     \item{margin}{Margin used.}
-#'     \item{window_size}{Window size used.}
-#'     \item{track_data}{Coordinates, timestamps, CRS from the input.}
-#'   }
-#'
-#' @references
-#' Kranstauber, B., Safi, K., & Bartumeus, F. (2014). Bivariate Gaussian
-#' bridges: directional factorization of diffusion in Brownian bridge
-#' models. *Movement Ecology*, 2(1), 5.
+#' @return For single-track input: an `mt_dbgb_variance` object.
+#'   For multi-track input: a named list of `mt_dbgb_variance` objects.
 #'
 #' @export
 mt_dbgb_variance <- function(object, location_error, margin, window_size,
                               parallel = FALSE, cores = NULL) {
+  .validate_move2(object)
+
+  if (mt_n_tracks(object) > 1) {
+    return(.dbgb_variance_multi(object, location_error, margin, window_size,
+                                 parallel, cores))
+  }
+
+  .dbgb_variance_single(object, location_error, margin, window_size,
+                          parallel, cores)
+}
+
+#' @keywords internal
+.dbgb_variance_single <- function(object, location_error, margin, window_size,
+                                   parallel = FALSE, cores = NULL) {
   td <- .extract_track_data(object)
   n <- td$n_locs
 
   location_error <- .expand_loc_error(location_error, n)
 
   if (n < window_size) {
-    stop("window_size cannot be larger than the number of locations.", call. = FALSE)
+    stop("window_size (", window_size, ") cannot be larger than the number of ",
+         "locations (", n, ").", call. = FALSE)
   }
   if (any((c(margin, window_size) %% 2) != 1)) {
     stop("margin and window_size must both be odd.", call. = FALSE)
@@ -47,7 +46,6 @@ mt_dbgb_variance <- function(object, location_error, margin, window_size,
 
   n_windows <- n - window_size + 1
 
-  # Function to process one window position
   process_window <- function(w) {
     idx <- w:(w + window_size - 1)
     res <- bgb_var_break(
@@ -61,20 +59,7 @@ mt_dbgb_variance <- function(object, location_error, margin, window_size,
     data.frame(seg = idx, paraSd = res$paraSd, orthSd = res$orthSd)
   }
 
-  # Process all windows — parallel or sequential
-  if (parallel) {
-    if (.Platform$OS.type == "windows") {
-      message("Note: parallel processing uses mclapply which is not available on Windows. ",
-              "Falling back to sequential processing.")
-      all_results <- lapply(seq_len(n_windows), process_window)
-    } else {
-      if (is.null(cores)) cores <- max(1, parallel::detectCores() - 1)
-      all_results <- parallel::mclapply(seq_len(n_windows), process_window,
-                                         mc.cores = cores)
-    }
-  } else {
-    all_results <- lapply(seq_len(n_windows), process_window)
-  }
+  all_results <- .run_lapply(seq_len(n_windows), process_window, parallel, cores)
 
   combined <- do.call(rbind, all_results)
   combined <- combined[!is.na(combined$paraSd), ]
@@ -111,6 +96,37 @@ mt_dbgb_variance <- function(object, location_error, margin, window_size,
     ),
     class = "mt_dbgb_variance"
   )
+}
+
+#' @keywords internal
+.dbgb_variance_multi <- function(object, location_error, margin, window_size,
+                                  parallel, cores) {
+  tracks <- .split_tracks(object)
+  results <- list()
+  skipped <- character(0)
+
+  for (nm in names(tracks)) {
+    trk <- tracks[[nm]]
+    if (nrow(trk) < window_size) {
+      skipped <- c(skipped, nm)
+      next
+    }
+    results[[nm]] <- .dbgb_variance_single(
+      trk, location_error = location_error,
+      margin = margin, window_size = window_size,
+      parallel = parallel, cores = cores
+    )
+  }
+
+  if (length(skipped) > 0) {
+    warning("Tracks skipped (fewer locations than window_size): ",
+            paste(skipped, collapse = ", "), call. = FALSE)
+  }
+  if (length(results) == 0) {
+    stop("No tracks had enough locations for the given window_size.", call. = FALSE)
+  }
+
+  results
 }
 
 #' @export

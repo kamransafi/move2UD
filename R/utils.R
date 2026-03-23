@@ -14,56 +14,28 @@ NULL
 #' @return A list with components `x`, `y`, `time_mins`, `n_locs`.
 #' @keywords internal
 .extract_track_data <- function(x) {
-  # Validate move2 object
-  if (!mt_is_move2(x)) {
-    stop("Input must be a move2 object.", call. = FALSE)
-  }
+  .validate_move2(x)
 
-  # Must be a single track
   if (mt_n_tracks(x) > 1) {
-    stop("Input must contain a single track. Use dplyr::filter() to select ",
-         "one individual, or process tracks in a loop.", call. = FALSE)
-  }
-
-  # Must be projected
-  if (st_is_longlat(x)) {
-    stop("Cannot use longitude/latitude coordinates. ",
-         "Transform to a projected CRS first, e.g.: ",
-         "sf::st_transform(x, move2::mt_aeqd_crs(x))",
-         call. = FALSE)
-  }
-
-  # Check for empty geometries
-  empties <- st_is_empty(x)
-  if (any(empties)) {
-    stop("Input contains ", sum(empties), " empty geometries (failed GPS fixes). ",
-         "Remove them first: x <- x[!sf::st_is_empty(x), ]",
+    stop("Internal error: .extract_track_data called with multiple tracks.",
          call. = FALSE)
   }
 
   coords <- st_coordinates(x)
-
-  # Check for NaN/NA coordinates
   if (any(!is.finite(coords))) {
     stop("Input contains non-finite coordinates (NA, NaN, or Inf).", call. = FALSE)
   }
 
-  timestamps <- mt_time(x)
-
-  # Check timestamps are ordered
-  ts_numeric <- as.numeric(timestamps)
+  ts_numeric <- as.numeric(mt_time(x))
   if (is.unsorted(ts_numeric, strictly = FALSE)) {
-    stop("Timestamps are not in chronological order. Sort the data first.",
-         call. = FALSE)
+    stop("Timestamps are not in chronological order.", call. = FALSE)
   }
-
-  # Check for duplicate timestamps
   if (any(diff(ts_numeric) == 0)) {
-    stop("Input contains duplicate timestamps. Remove duplicates first, e.g.: ",
+    stop("Input contains duplicate timestamps. Remove duplicates first: ",
          "move2::mt_filter_unique(x)", call. = FALSE)
   }
 
-  time_mins <- ts_numeric / 60  # minutes (matching move convention)
+  time_mins <- ts_numeric / 60
 
   list(
     x = coords[, 1],
@@ -90,6 +62,58 @@ NULL
     stop("location_error must be positive.", call. = FALSE)
   }
   location_error
+}
+
+#' Validate a move2 object (common checks that apply regardless of track count)
+#' @keywords internal
+.validate_move2 <- function(x) {
+  if (!mt_is_move2(x)) {
+    stop("Input must be a move2 object.", call. = FALSE)
+  }
+  if (st_is_longlat(x)) {
+    stop("Cannot use longitude/latitude coordinates. ",
+         "Transform to a projected CRS first, e.g.: ",
+         "sf::st_transform(x, move2::mt_aeqd_crs(x))",
+         call. = FALSE)
+  }
+  empties <- st_is_empty(x)
+  if (any(empties)) {
+    stop("Input contains ", sum(empties), " empty geometries (failed GPS fixes). ",
+         "Remove them first: x <- x[!sf::st_is_empty(x), ]",
+         call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+#' Split a multi-track move2 object into a named list of single-track objects
+#' @keywords internal
+.split_tracks <- function(x) {
+  .validate_move2(x)
+  ids <- unique(mt_track_id(x))
+  tracks <- lapply(ids, function(id) {
+    x[mt_track_id(x) == id, ]
+  })
+  names(tracks) <- as.character(ids)
+
+  # Validate each track individually
+  for (nm in names(tracks)) {
+    trk <- tracks[[nm]]
+    if (nrow(trk) == 0) next
+    coords <- st_coordinates(trk)
+    if (any(!is.finite(coords))) {
+      stop("Track '", nm, "' contains non-finite coordinates.", call. = FALSE)
+    }
+    ts_numeric <- as.numeric(mt_time(trk))
+    if (is.unsorted(ts_numeric, strictly = FALSE)) {
+      stop("Track '", nm, "' has timestamps not in chronological order.", call. = FALSE)
+    }
+    if (any(diff(ts_numeric) == 0)) {
+      stop("Track '", nm, "' contains duplicate timestamps. ",
+           "Remove duplicates first: move2::mt_filter_unique(x)", call. = FALSE)
+    }
+  }
+
+  tracks
 }
 
 #' Calculate extended bounding box for raster creation

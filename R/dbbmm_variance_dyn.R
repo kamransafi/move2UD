@@ -3,9 +3,8 @@
 #' Estimate the dynamic Brownian motion variance using a sliding window
 #' approach with BIC-based breakpoint detection.
 #'
-#' @param object A `move2` object containing a single track. Must be in a
-#'   projected coordinate system (not longitude/latitude). Use
-#'   [move2::mt_aeqd_crs()] to create a suitable projection.
+#' @param object A `move2` object (single or multi-track). Must be in a
+#'   projected coordinate system. Use [move2::mt_aeqd_crs()] to project.
 #' @param location_error Numeric scalar or vector of location errors (in map
 #'   units) for each position.
 #' @param window_size Integer (must be odd). The number of locations in each
@@ -13,55 +12,31 @@
 #' @param margin Integer (must be odd). The minimum number of locations on
 #'   each side of a potential breakpoint within a window.
 #' @param parallel Logical. If `TRUE`, use parallel processing for the
-#'   sliding window loop. Defaults to `FALSE`. Uses [parallel::mclapply()]
-#'   on Unix/macOS and sequential processing on Windows.
-#' @param cores Integer. Number of cores for parallel processing. Defaults
-#'   to `parallel::detectCores() - 1`.
+#'   sliding window loop. Defaults to `FALSE`.
+#' @param cores Integer. Number of cores for parallel processing.
 #'
-#' @return An `mt_dbbmm_variance` object (S3 list) containing:
-#'   \describe{
-#'     \item{variance}{Numeric vector of estimated BM variances per segment
-#'       (NA for positions outside the estimable range).}
-#'     \item{in_windows}{Number of windows each segment was estimated in.}
-#'     \item{interest}{Logical vector indicating segments fully covered by
-#'       the sliding window.}
-#'     \item{break_list}{Integer vector of detected breakpoint positions.}
-#'     \item{window_size}{The window size used.}
-#'     \item{margin}{The margin used.}
-#'     \item{track_data}{Coordinates, timestamps, and CRS from the input.}
-#'   }
-#'
-#' @details
-#' The method estimates BM variance using a leave-one-out likelihood approach
-#' within a sliding window. At each window position, it tests whether a single
-#' variance or two variances (split at a breakpoint) better fit the data,
-#' using BIC for model selection.
-#'
-#' The variance estimation and breakpoint testing are implemented in C for
-#' performance. The sliding window loop can optionally be parallelised across
-#' cores.
-#'
-#' @references
-#' Kranstauber, B., Kays, R., LaPoint, S. D., Wikelski, M., & Safi, K.
-#' (2012). A dynamic Brownian bridge movement model to estimate utilization
-#' distributions for heterogeneous animal movement. *Journal of Animal
-#' Ecology*, 81(4), 738-746.
-#'
-#' @examples
-#' \dontrun{
-#' library(move2)
-#' library(sf)
-#' fishers <- mt_read(mt_example())
-#' fishers <- fishers[!st_is_empty(fishers), ]
-#' f1 <- fishers[mt_track_id(fishers) == "F1", ]
-#' f1_proj <- st_transform(f1, mt_aeqd_crs(f1))
-#' var_obj <- mt_dbbmm_variance(f1_proj, location_error = 25,
-#'                               window_size = 31, margin = 11)
-#' }
+#' @return For a single-track input: an `mt_dbbmm_variance` object.
+#'   For multi-track input: a named list of `mt_dbbmm_variance` objects,
+#'   one per track. Tracks with too few locations for the given
+#'   window_size are skipped with a warning.
 #'
 #' @export
 mt_dbbmm_variance <- function(object, location_error, window_size, margin,
                                parallel = FALSE, cores = NULL) {
+  .validate_move2(object)
+
+  if (mt_n_tracks(object) > 1) {
+    return(.dbbmm_variance_multi(object, location_error, window_size, margin,
+                                  parallel, cores))
+  }
+
+  .dbbmm_variance_single(object, location_error, window_size, margin,
+                           parallel, cores)
+}
+
+#' @keywords internal
+.dbbmm_variance_single <- function(object, location_error, window_size, margin,
+                                    parallel = FALSE, cores = NULL) {
   td <- .extract_track_data(object)
   n <- td$n_locs
 
@@ -69,7 +44,8 @@ mt_dbbmm_variance <- function(object, location_error, window_size, margin,
   location_error <- .expand_loc_error(location_error, n)
 
   if (n < window_size) {
-    stop("window_size cannot be larger than the number of locations.", call. = FALSE)
+    stop("window_size (", window_size, ") cannot be larger than the number of ",
+         "locations (", n, ").", call. = FALSE)
   }
   if (any((c(margin, window_size) %% 2) != 1)) {
     stop("margin and window_size must both be odd.", call. = FALSE)
@@ -80,10 +56,8 @@ mt_dbbmm_variance <- function(object, location_error, window_size, margin,
 
   breaks_range <- margin:(window_size - margin + 1)
   uneven_breaks <- breaks_range[(breaks_range %% 2) == 1]
-
   n_windows <- n - window_size + 1
 
-  # Function to process one window position using C
   process_window <- function(w) {
     idx <- w:(w - 1 + window_size)
     res <- .Call("bm_variance_window_c",
@@ -96,21 +70,8 @@ mt_dbbmm_variance <- function(object, location_error, window_size, margin,
     )
   }
 
-  # Process all windows — parallel or sequential
-  if (parallel) {
-    if (.Platform$OS.type == "windows") {
-      message("Note: parallel processing uses mclapply which is not available on Windows. ",
-              "Falling back to sequential processing.")
-      results <- lapply(1:n_windows, process_window)
-    } else {
-      if (is.null(cores)) cores <- max(1, parallel::detectCores() - 1)
-      results <- parallel::mclapply(1:n_windows, process_window, mc.cores = cores)
-    }
-  } else {
-    results <- lapply(1:n_windows, process_window)
-  }
+  results <- .run_lapply(1:n_windows, process_window, parallel, cores)
 
-  # Aggregate results
   all_vars <- do.call(rbind, lapply(results, function(r) {
     data.frame(BMvar = r$vars, loc = r$locs)
   }))
@@ -148,6 +109,55 @@ mt_dbbmm_variance <- function(object, location_error, window_size, margin,
     ),
     class = "mt_dbbmm_variance"
   )
+}
+
+#' @keywords internal
+.dbbmm_variance_multi <- function(object, location_error, window_size, margin,
+                                   parallel, cores) {
+  tracks <- .split_tracks(object)
+  results <- list()
+  skipped <- character(0)
+
+  for (nm in names(tracks)) {
+    trk <- tracks[[nm]]
+    n <- nrow(trk)
+    if (n < window_size) {
+      skipped <- c(skipped, nm)
+      next
+    }
+    results[[nm]] <- .dbbmm_variance_single(
+      trk, location_error = location_error,
+      window_size = window_size, margin = margin,
+      parallel = parallel, cores = cores
+    )
+  }
+
+  if (length(skipped) > 0) {
+    warning("Tracks skipped (fewer locations than window_size): ",
+            paste(skipped, collapse = ", "), call. = FALSE)
+  }
+  if (length(results) == 0) {
+    stop("No tracks had enough locations for the given window_size.", call. = FALSE)
+  }
+
+  results
+}
+
+#' Helper: run lapply or mclapply depending on parallel flag
+#' @keywords internal
+.run_lapply <- function(X, FUN, parallel, cores) {
+  if (parallel) {
+    if (.Platform$OS.type == "windows") {
+      message("Note: parallel processing uses mclapply which is not available ",
+              "on Windows. Falling back to sequential processing.")
+      lapply(X, FUN)
+    } else {
+      if (is.null(cores)) cores <- max(1, parallel::detectCores() - 1)
+      parallel::mclapply(X, FUN, mc.cores = cores)
+    }
+  } else {
+    lapply(X, FUN)
+  }
 }
 
 #' @export

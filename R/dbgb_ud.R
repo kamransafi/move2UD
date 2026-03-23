@@ -1,26 +1,21 @@
 #' Dynamic Bivariate Gaussian Bridge — Utilisation Distribution
 #'
 #' Compute a utilisation distribution using the dynamic bivariate Gaussian
-#' bridge model, which decomposes movement variance into parallel (along
-#' the direction of travel) and orthogonal components.
+#' bridge model.
 #'
-#' @param object A `move2` object (single track, projected CRS) or an
-#'   `mt_dbgb_variance` object from [mt_dbgb_variance()].
-#' @param raster A `terra::SpatRaster` defining the output grid, or a
-#'   numeric cell size, or `NULL` to auto-compute.
+#' @param object A `move2` object (single or multi-track), an
+#'   `mt_dbgb_variance` object, or a named list of `mt_dbgb_variance` objects.
+#' @param raster A `terra::SpatRaster`, numeric cell size, or `NULL`.
 #' @param location_error Numeric scalar or vector of location errors.
 #' @param margin Integer (odd). Margin for variance window.
 #' @param window_size Integer (odd). Window size for variance estimation.
 #' @param ext Numeric. Extension factor for bounding box.
-#' @param dim_size Integer. Cells along longest dimension (when raster is NULL).
+#' @param dim_size Integer. Cells along longest dimension.
 #' @param time_step Numeric. Integration time step (minutes).
+#' @param verbose Logical. Print progress messages.
 #'
-#' @return A `terra::SpatRaster` containing the UD (values sum to 1).
-#'
-#' @references
-#' Kranstauber, B., Safi, K., & Bartumeus, F. (2014). Bivariate Gaussian
-#' bridges: directional factorization of diffusion in Brownian bridge
-#' models. *Movement Ecology*, 2(1), 5.
+#' @return For single-track: a `terra::SpatRaster` (values sum to 1).
+#'   For multi-track: a multi-layer `terra::SpatRaster`, one layer per track.
 #'
 #' @export
 mt_dbgb_ud <- function(object,
@@ -30,7 +25,8 @@ mt_dbgb_ud <- function(object,
                         window_size = 31,
                         ext = 0.5,
                         dim_size = 100,
-                        time_step = NULL) {
+                        time_step = NULL,
+                        verbose = TRUE) {
   UseMethod("mt_dbgb_ud")
 }
 
@@ -42,11 +38,54 @@ mt_dbgb_ud.move2 <- function(object,
                                window_size = 31,
                                ext = 0.5,
                                dim_size = 100,
-                               time_step = NULL) {
+                               time_step = NULL,
+                               verbose = TRUE) {
   var_obj <- mt_dbgb_variance(object, location_error = location_error,
                                margin = margin, window_size = window_size)
   mt_dbgb_ud(var_obj, raster = raster, location_error = location_error,
-              ext = ext, dim_size = dim_size, time_step = time_step)
+              ext = ext, dim_size = dim_size, time_step = time_step,
+              verbose = verbose)
+}
+
+#' @export
+mt_dbgb_ud.list <- function(object,
+                              raster = NULL,
+                              location_error,
+                              ext = 0.5,
+                              dim_size = 100,
+                              time_step = NULL,
+                              verbose = TRUE,
+                              ...) {
+  if (!all(vapply(object, inherits, logical(1), "mt_dbgb_variance"))) {
+    stop("List must contain mt_dbgb_variance objects.", call. = FALSE)
+  }
+
+  if (is.null(raster) || (is.numeric(raster) && length(raster) == 1)) {
+    all_x <- unlist(lapply(object, function(v) v$track_data$x))
+    all_y <- unlist(lapply(object, function(v) v$track_data$y))
+    crs <- object[[1]]$track_data$crs
+    pts <- sf::st_as_sf(data.frame(x = all_x, y = all_y),
+                         coords = c("x", "y"), crs = crs)
+    if (is.numeric(raster)) {
+      common_raster <- .make_raster(pts, cell_size = raster, ext = ext)
+    } else {
+      common_raster <- .make_raster(pts, dim_size = dim_size, ext = ext)
+    }
+  } else {
+    common_raster <- raster
+  }
+
+  layers <- lapply(names(object), function(nm) {
+    if (verbose) message("Computing UD for track: ", nm)
+    mt_dbgb_ud(object[[nm]], raster = common_raster,
+                location_error = location_error,
+                ext = ext, dim_size = dim_size,
+                time_step = time_step, verbose = FALSE)
+  })
+
+  stk <- terra::rast(layers)
+  names(stk) <- names(object)
+  stk
 }
 
 #' @export
@@ -56,14 +95,13 @@ mt_dbgb_ud.mt_dbgb_variance <- function(object,
                                           ext = 0.5,
                                           dim_size = 100,
                                           time_step = NULL,
+                                          verbose = TRUE,
                                           ...) {
   td <- object$track_data
   n <- td$n_locs
   location_error <- .expand_loc_error(location_error, n)
 
-  # Match original move package: include positions where either the
-  # segment interest flag or its mirror is TRUE. This ensures symmetric
-  # margin handling for the bridge computation.
+  # Match original move package
   points_interest <- object$seg_interest | rev(object$seg_interest)
 
   if (is.null(raster)) {
