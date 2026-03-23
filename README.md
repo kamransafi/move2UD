@@ -205,6 +205,13 @@ terra::plot(uds[["F1"]])
 terra::plot(uds[["M1"]])
 ```
 
+## Vignettes
+
+The package includes two vignettes with worked examples:
+
+- **`vignette("dbbmm", package = "move2UD")`** — Dynamic Brownian Bridge Movement Models: full workflow from data preparation through variance estimation to UD computation, including multi-track handling and parameter guidance.
+- **`vignette("dbgb", package = "move2UD")`** — Dynamic Bivariate Gaussian Bridges: directional variance decomposition, the directionality index, comparison with dBBMM, and guidance on when to use each method.
+
 ## Performance
 
 The package includes several performance optimisations over the original `move` implementation:

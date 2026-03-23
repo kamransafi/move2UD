@@ -138,7 +138,7 @@ Suggested: `parallel` (for `mclapply`), `testthat` (>= 3.0.0)
 ## Testing
 
 ### Current state
-80 tests, 0 failures, 0 warnings.
+80 tests, 0 failures, 0 warnings. R CMD check: Status OK (0 errors, 0 warnings, 0 notes).
 
 ### Test files
 | File | Tests | Purpose |
@@ -177,13 +177,19 @@ Benchmarks on fisher F1 (1349 locations, 8 cores):
 3. **Sequential break search** for dBGB: O(n) instead of O(n²) — 1.5x algorithmic improvement
 4. **OpenMP grid kernels** (`bgb_bbmm_omp.c`): `#pragma omp parallel for collapse(2)` on inner cell loops — 12.9x for UD computation
 
+## Vignettes
+
+Two vignettes in `vignettes/`:
+
+- **`dbbmm.Rmd`**: Full dBBMM workflow — data preparation, variance estimation, UD computation, multi-track handling, parameter selection guidance. Based on Kranstauber et al. (2012).
+- **`dbgb.Rmd`**: Full dBGB workflow — directional variance decomposition, directionality index interpretation, comparison with dBBMM, guidance on when to use each method. Based on Kranstauber, Safi & Bartumeus (2014).
+
+Both vignettes use `\donttest`-style code blocks and have been verified to execute correctly against the fisher example data.
+
 ## Remaining work (in priority order)
 
-1. **Roxygen documentation** — full `@param`, `@return`, `@examples` for all exported functions. Currently missing `.Rd` files (R CMD check WARNING)
-2. **S3 method signature alignment** — ensure method signatures match generics (R CMD check WARNING)
-3. **Vignette** — worked example from `move2` object to UD plot, showing single-track and multi-track workflows
-4. **dBGB C optimizer** — move the L-BFGS-B optimization in `bgb_var_break()` to C for further speedup (currently the dBGB bottleneck)
-5. **`\donttest` examples** — convert from `\dontrun` so examples are checked during `R CMD check --run-donttest`
+1. **dBGB C optimizer** — move the L-BFGS-B optimization in `bgb_var_break()` to C for further speedup (currently the dBGB bottleneck)
+2. **`\donttest` examples** — examples use `\donttest` and run correctly; could convert selected ones to always-run for CRAN
 
 ## Authoritative references
 

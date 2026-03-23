@@ -1,0 +1,245 @@
+---
+title: "Dynamic Brownian Bridge Movement Models"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Dynamic Brownian Bridge Movement Models}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5
+)
+```
+
+## Overview
+
+The dynamic Brownian bridge movement model (dBBMM) estimates utilisation
+distributions from animal tracking data by modelling movement as a
+conditional random walk between observed locations. Unlike static kernel
+methods, the dBBMM accounts for the sequential nature of movement data,
+the time between observations, and location error — and allows the
+movement process to change along the trajectory.
+
+This vignette demonstrates the full workflow using `move2UD` with
+`move2` objects.
+
+### Background
+
+The Brownian bridge movement model (Horne et al. 2007) assumes that an
+animal's path between two observed locations follows a conditional
+Brownian motion — a random walk that starts at one location and ends at
+the next, with the amount of "spread" determined by a movement variance
+parameter (σ²ₘ). This variance captures how much the animal deviates
+from a straight-line path between fixes.
+
+The **dynamic** extension (Kranstauber et al. 2012) allows σ²ₘ to change
+along the trajectory. A sliding window moves across the track, and at
+each position the method tests whether a single variance or two different
+variances (split at a breakpoint) better describe the data within that
+window, using the Bayesian Information Criterion (BIC) for model
+selection. This means the model automatically detects changes in
+movement behaviour — for example, the transition from resting (low
+variance) to active movement (high variance).
+
+## Preparing the data
+
+```{r setup, message=FALSE}
+library(move2UD)
+library(move2)
+library(sf)
+library(terra)
+```
+
+We use the fisher tracking data bundled with `move2`. The data must be:
+
+- A `move2` object
+- In a projected coordinate system (not longitude/latitude)
+- Free of empty geometries (failed GPS fixes removed)
+- Sorted by time with no duplicate timestamps
+
+```{r prepare-data}
+# Load the fisher data
+fishers <- mt_read(mt_example())
+
+# Remove empty geometries (failed GPS fixes)
+fishers <- fishers[!st_is_empty(fishers), ]
+
+# Select one individual
+f1 <- fishers[mt_track_id(fishers) == "F1", ]
+cat("Fisher F1:", nrow(f1), "locations\n")
+
+# Project to an azimuthal equidistant CRS centred on the data
+# This ensures distances are in metres and consistent across the study area
+f1_proj <- st_transform(f1, mt_aeqd_crs(f1))
+```
+
+## Step 1: Estimate the dynamic variance
+
+The variance estimation is the core of the dBBMM. The key parameters are:
+
+- **`location_error`**: The GPS measurement error in metres. For typical
+  consumer GPS units, 10–30 m is common.
+- **`window_size`**: The number of locations in the sliding window (must be
+  odd). Larger windows produce smoother variance estimates but may miss
+  short behavioural changes. Smaller windows are more sensitive but noisier.
+- **`margin`**: The minimum number of locations on each side of a potential
+  breakpoint (must be odd). Defines the minimum segment length for
+  breakpoint detection.
+
+```{r estimate-variance}
+var_obj <- mt_dbbmm_variance(f1_proj,
+                              location_error = 25,
+                              window_size = 31,
+                              margin = 11)
+var_obj
+```
+
+### Inspecting the variance
+
+The estimated variance reflects the animal's movement process at each
+point in time. High variance indicates active, wide-ranging movement;
+low variance indicates resting or confined movement.
+
+```{r plot-variance, fig.cap="Dynamic Brownian motion variance over time for Fisher F1. Peaks correspond to periods of active movement; valleys indicate resting."}
+timestamps <- var_obj$track_data$timestamps
+variance <- mt_motion_variance(var_obj)
+
+plot(timestamps, variance, type = "l", col = "steelblue",
+     xlab = "Time", ylab = expression(sigma[m]^2),
+     main = "Dynamic BM Variance — Fisher F1")
+```
+
+### Breakpoints
+
+The method detects breakpoints where the movement process changes. These
+are stored in the variance object:
+
+```{r breakpoints}
+cat("Breakpoints detected:", length(var_obj$break_list), "\n")
+```
+
+## Step 2: Compute the utilisation distribution
+
+The UD is computed by evaluating the Brownian bridge probability density
+at regular time steps along the trajectory and accumulating the density
+onto a raster grid.
+
+```{r compute-ud}
+ud <- mt_dbbmm_ud(var_obj,
+                    location_error = 25,
+                    ext = 1.0,
+                    dim_size = 150,
+                    verbose = FALSE)
+```
+
+The result is a `terra::SpatRaster` where cell values sum to 1.0:
+
+```{r plot-ud, fig.cap="dBBMM utilisation distribution for Fisher F1. Darker areas indicate higher probability of use."}
+plot(ud, main = "dBBMM Utilisation Distribution — Fisher F1",
+     col = hcl.colors(50, "viridis"))
+```
+
+### One-step convenience
+
+For quick analyses, you can skip the separate variance step and pass the
+`move2` object directly to `mt_dbbmm_ud()`:
+
+```{r one-step, eval=FALSE}
+ud <- mt_dbbmm_ud(f1_proj,
+                    location_error = 25,
+                    window_size = 31,
+                    margin = 11)
+```
+
+## Working with multiple individuals
+
+All functions accept multi-track `move2` objects. Variance is estimated
+per track, and UDs are computed on a common grid for direct comparison.
+
+```{r multi-track}
+# Project all fishers
+fishers_proj <- st_transform(fishers, mt_aeqd_crs(fishers))
+
+# Estimate variance for all tracks
+var_list <- mt_dbbmm_variance(fishers_proj,
+                               location_error = 25,
+                               window_size = 31,
+                               margin = 11)
+cat("Tracks processed:", length(var_list), "\n")
+cat("Track names:", paste(names(var_list), collapse = ", "), "\n")
+```
+
+```{r multi-ud, fig.cap="Utilisation distributions for two fishers on a common grid."}
+# Compute stacked UDs (common grid)
+# Use just two tracks for speed
+var_two <- var_list[c("F1", "M1")]
+uds <- mt_dbbmm_ud(var_two,
+                     location_error = 25,
+                     ext = 1.0,
+                     dim_size = 100,
+                     verbose = FALSE)
+
+par(mfrow = c(1, 2))
+plot(uds[["F1"]], main = "F1", col = hcl.colors(50, "viridis"))
+plot(uds[["M1"]], main = "M1", col = hcl.colors(50, "viridis"))
+```
+
+## Parallel processing
+
+For large datasets, the sliding window computation can be parallelised:
+
+```{r parallel, eval=FALSE}
+var_obj <- mt_dbbmm_variance(f1_proj,
+                              location_error = 25,
+                              window_size = 71,
+                              margin = 21,
+                              parallel = TRUE,
+                              cores = 4)
+```
+
+This uses `parallel::mclapply()` on Unix/macOS. On Windows, it falls
+back to sequential processing with a message.
+
+## Choosing parameters
+
+### Window size and margin
+
+The `window_size` determines the temporal scale at which behavioural
+changes are detected. A good starting point is to consider the expected
+duration of behavioural bouts:
+
+- **Short bouts** (minutes to hours): smaller windows (e.g., 21–31)
+- **Long bouts** (hours to days): larger windows (e.g., 51–101)
+
+The `margin` must be at least 3 and satisfies `window_size >= 2 * margin + 1`.
+A margin of about 1/3 of the window size is typical.
+
+### Location error
+
+The location error should reflect the actual GPS measurement accuracy,
+not an arbitrary value. For most wildlife GPS units, 10–30 m is
+appropriate. Setting it too low can produce artefacts; too high
+oversmooths the UD.
+
+### Raster resolution
+
+The `dim_size` parameter controls the number of cells along the longest
+dimension. Higher values give finer resolution but increase computation
+time. For exploratory work, 100 is sufficient; for publication-quality
+maps, 300–500 is typical.
+
+## References
+
+Horne, J. S., Garton, E. O., Krone, S. M., & Lewis, J. S. (2007).
+Analyzing animal movements using Brownian bridges. *Ecology*, 88(9),
+2354–2363.
+
+Kranstauber, B., Kays, R., LaPoint, S. D., Wikelski, M., & Safi, K.
+(2012). A dynamic Brownian bridge movement model to estimate utilization
+distributions for heterogeneous animal movement. *Journal of Animal
+Ecology*, 81(4), 738–746.

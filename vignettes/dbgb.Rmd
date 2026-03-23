@@ -1,0 +1,239 @@
+---
+title: "Dynamic Bivariate Gaussian Bridges"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Dynamic Bivariate Gaussian Bridges}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5
+)
+```
+
+## Overview
+
+The dynamic bivariate Gaussian bridge (dBGB) extends the dynamic
+Brownian bridge movement model (dBBMM) by decomposing the movement
+variance into two components: one **parallel** to the direction of travel
+and one **orthogonal** (perpendicular) to it. This directional
+factorisation provides richer information about the movement process and
+produces more realistic utilisation distributions — narrower along
+directed segments and wider where movement is random.
+
+This vignette demonstrates the dBGB workflow and how to interpret the
+directional variance decomposition.
+
+### Background
+
+In the standard dBBMM, the movement variance σ²ₘ is isotropic — the
+animal is assumed to deviate equally in all directions from the expected
+straight-line path between fixes. In reality, animals moving in a
+directed fashion (e.g., commuting, migrating) deviate mostly along the
+axis of travel (varying speed) rather than perpendicular to it (varying
+course). An animal foraging within a patch, by contrast, deviates
+roughly equally in all directions.
+
+The dBGB (Kranstauber, Safi & Bartumeus 2014) captures this distinction
+by estimating two variance components:
+
+- **σ²_parallel**: variance along the direction of travel, reflecting
+  speed variation within a segment.
+- **σ²_orthogonal**: variance perpendicular to the direction of travel,
+  reflecting course deviation.
+
+From these, a **directionality index** can be computed:
+
+$$I_d = \frac{\sigma^2_{parallel} - \sigma^2_{orthogonal}}{\sigma^2_{parallel} + \sigma^2_{orthogonal}}$$
+
+where:
+
+- $I_d \approx 0$ indicates **Brownian motion** (isotropic movement)
+- $I_d > 0$ indicates **directed movement** (more variation in speed
+  than in course)
+- $I_d < 0$ indicates **constrained movement** (more course variation
+  than speed variation — e.g., movement along a narrow corridor)
+
+## Preparing the data
+
+```{r setup, message=FALSE}
+library(move2UD)
+library(move2)
+library(sf)
+library(terra)
+```
+
+Data preparation is identical to the dBBMM workflow:
+
+```{r prepare-data}
+fishers <- mt_read(mt_example())
+fishers <- fishers[!st_is_empty(fishers), ]
+f1 <- fishers[mt_track_id(fishers) == "F1", ]
+f1_proj <- st_transform(f1, mt_aeqd_crs(f1))
+cat("Fisher F1:", nrow(f1_proj), "locations\n")
+```
+
+## Step 1: Estimate directional variance
+
+The dBGB variance estimation works similarly to the dBBMM but produces
+two variance components. The breakpoint detection operates independently
+on the parallel and orthogonal dimensions — a change in directed
+behaviour (parallel) does not necessarily coincide with a change in
+course deviation (orthogonal).
+
+```{r estimate-variance}
+var_obj <- mt_dbgb_variance(f1_proj,
+                             location_error = 25,
+                             margin = 15,
+                             window_size = 31)
+var_obj
+```
+
+### Extracting the variance components
+
+The `mt_motion_variance()` accessor returns a data.frame with the
+parallel and orthogonal variances:
+
+```{r extract-variance}
+mv <- mt_motion_variance(var_obj)
+head(mv, 10)
+```
+
+### Plotting the variance components
+
+```{r plot-variance, fig.cap="Parallel (blue) and orthogonal (orange) movement variance for Fisher F1. When parallel variance exceeds orthogonal, the animal is moving directionally."}
+timestamps <- var_obj$track_data$timestamps
+
+plot(timestamps, mv$para, type = "l", col = "steelblue",
+     xlab = "Time", ylab = expression(sigma^2),
+     main = "dBGB Variance Components — Fisher F1",
+     ylim = range(c(mv$para, mv$orth), na.rm = TRUE))
+lines(timestamps, mv$orth, col = "darkorange")
+legend("topright", legend = c("Parallel", "Orthogonal"),
+       col = c("steelblue", "darkorange"), lty = 1, bty = "n")
+```
+
+### The directionality index
+
+The directionality index $I_d$ summarises the movement process at each
+point in time:
+
+```{r directionality, fig.cap="Directionality index over time. Values near 0 indicate Brownian motion; positive values indicate directed movement. The nocturnal activity pattern of the fisher is visible as periodic shifts."}
+I_d <- (mv$para - mv$orth) / (mv$para + mv$orth)
+
+plot(timestamps, I_d, type = "l", col = "grey30",
+     xlab = "Time", ylab = expression(I[d]),
+     main = "Directionality Index — Fisher F1")
+abline(h = 0, lty = 2, col = "red")
+```
+
+### Comparing dBBMM and dBGB variance
+
+The isotropic dBBMM variance is a single number that combines the
+parallel and orthogonal components. We can compare:
+
+```{r compare-variance, fig.cap="The isotropic dBBMM variance (black) compared to the parallel (blue) and orthogonal (orange) dBGB components. The dBGB reveals that the isotropic estimate is dominated by the parallel component during directed movement."}
+var_dbbmm <- mt_dbbmm_variance(f1_proj, location_error = 25,
+                                 window_size = 31, margin = 11)
+bm_var <- mt_motion_variance(var_dbbmm)
+
+plot(timestamps, bm_var, type = "l", col = "black", lwd = 2,
+     xlab = "Time", ylab = expression(sigma^2),
+     main = "Isotropic vs Directional Variance",
+     ylim = range(c(bm_var, mv$para, mv$orth), na.rm = TRUE))
+lines(timestamps, mv$para, col = "steelblue")
+lines(timestamps, mv$orth, col = "darkorange")
+legend("topright",
+       legend = c("dBBMM (isotropic)", "dBGB parallel", "dBGB orthogonal"),
+       col = c("black", "steelblue", "darkorange"),
+       lty = 1, lwd = c(2, 1, 1), bty = "n")
+```
+
+## Step 2: Compute the utilisation distribution
+
+The dBGB UD uses an anisotropic Gaussian kernel at each time step. The
+kernel is elongated along the direction of travel when the parallel
+variance exceeds the orthogonal variance, producing a narrower UD along
+directed segments.
+
+```{r compute-ud}
+ud <- mt_dbgb_ud(var_obj,
+                  location_error = 25,
+                  ext = 2.0,
+                  dim_size = 150)
+```
+
+```{r plot-ud, fig.cap="dBGB utilisation distribution for Fisher F1. The anisotropic kernel produces an elongated UD along directed movement corridors compared to the isotropic dBBMM."}
+plot(ud, main = "dBGB Utilisation Distribution — Fisher F1",
+     col = hcl.colors(50, "viridis"))
+```
+
+### Comparing dBBMM and dBGB UDs
+
+The key difference between the two methods is visible in the shape of
+the UD along directed movement segments. The dBGB UD is typically
+narrower along commuting corridors and wider in foraging areas.
+
+```{r compare-ud, fig.cap="Comparison of isotropic (dBBMM, left) and directional (dBGB, right) utilisation distributions."}
+ud_dbbmm <- mt_dbbmm_ud(var_dbbmm, location_error = 25,
+                          ext = 2.0, dim_size = 150, verbose = FALSE)
+
+par(mfrow = c(1, 2))
+plot(ud_dbbmm, main = "dBBMM (isotropic)",
+     col = hcl.colors(50, "viridis"))
+plot(ud, main = "dBGB (directional)",
+     col = hcl.colors(50, "viridis"))
+```
+
+## When to use dBGB vs dBBMM
+
+| Criterion | dBBMM | dBGB |
+|---|---|---|
+| Movement type | General-purpose | Best when directed and random movement alternate |
+| Computational cost | Faster (~3–6x) | Slower (more parameters to estimate) |
+| Information content | Single variance per segment | Parallel + orthogonal + directionality index |
+| UD shape | Isotropic spread around path | Anisotropic: narrow along corridors, wide in patches |
+| Recommended for | Home range estimation, general UD | Migration corridors, commuting routes, behavioural analysis |
+
+For most applications, starting with the dBBMM is appropriate. The dBGB
+adds value when the research question specifically concerns directional
+movement or when the animal's behaviour includes clear transitions
+between directed and random phases.
+
+## Multiple individuals
+
+The multi-track workflow is identical to the dBBMM:
+
+```{r multi-track, eval=FALSE}
+fishers_proj <- st_transform(fishers, mt_aeqd_crs(fishers))
+
+# Variance for all tracks
+var_list <- mt_dbgb_variance(fishers_proj,
+                              location_error = 25,
+                              margin = 15,
+                              window_size = 31)
+
+# Stacked UDs on a common grid
+uds <- mt_dbgb_ud(var_list, location_error = 25)
+terra::nlyr(uds)  # one layer per track
+```
+
+## References
+
+Kranstauber, B., Safi, K., & Bartumeus, F. (2014). Bivariate Gaussian
+bridges: directional factorization of diffusion in Brownian bridge
+models. *Movement Ecology*, 2(1), 5.
+
+Kranstauber, B., Kays, R., LaPoint, S. D., Wikelski, M., & Safi, K.
+(2012). A dynamic Brownian bridge movement model to estimate utilization
+distributions for heterogeneous animal movement. *Journal of Animal
+Ecology*, 81(4), 738–746.
+
+Horne, J. S., Garton, E. O., Krone, S. M., & Lewis, J. S. (2007).
+Analyzing animal movements using Brownian bridges. *Ecology*, 88(9),
+2354–2363.
